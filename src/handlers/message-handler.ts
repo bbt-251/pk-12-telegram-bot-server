@@ -39,7 +39,7 @@ export async function handleMessage(
  * Handle bid placement flow (amount -> number of trucks)
  */
 async function handleBidFlow(
-    bot: TelegramBot,
+    _bot: TelegramBot,
     chatId: number,
     text: string,
     pendingBid: {
@@ -113,7 +113,6 @@ async function handleBidFlow(
                     pendingBid.loadRequestId,
                     pendingBid.transporterId,
                     pendingBid.transporterName,
-                    pendingBid.transporterPhone,
                     state.bidAmount!,
                     trucks,
                     pendingBid.projectName

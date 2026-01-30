@@ -10,7 +10,6 @@ export async function createBid(
     loadRequestId: string,
     transporterId: string,
     transporterName: string,
-    transporterPhone: string,
     bidAmount: number,
     numberOfTrucks: number,
     projectName: string

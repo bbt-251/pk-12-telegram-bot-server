@@ -33,8 +33,7 @@ export async function handleCallbackQuery(
         const loadRequestId = data.replace('place_bid_', '');
         await handlePlaceBidCallback(bot, callbackId, loadRequestId, chatId, userId);
     } else if (data.startsWith('cancel_bid_')) {
-        const loadRequestId = data.replace('cancel_bid_', '');
-        await handleCancelBidCallback(bot, callbackId, loadRequestId, chatId, userId);
+        await handleCancelBidCallback(bot, callbackId,  chatId, userId);
     } else {
         // Answer callback to remove loading state
         await bot.answerCallbackQuery(callbackId);
@@ -170,7 +169,6 @@ async function handlePlaceBidCallback(
 async function handleCancelBidCallback(
     bot: TelegramBot,
     callbackId: string,
-    loadRequestId: string,
     chatId: number,
     userId?: number
 ): Promise<void> {
