@@ -62,6 +62,7 @@ export async function createBid(
 
 /**
  * Check if transporter has already bid on a load request
+ * Returns the bid if it exists and is not accepted, null otherwise
  */
 export async function hasExistingBid(
     loadRequestId: string,
@@ -82,6 +83,96 @@ export async function hasExistingBid(
     }, 2, 1000, projectName);
 
     return !query.empty;
+}
+
+/**
+ * Get existing bid by transporter and load request
+ * Returns the bid if it exists, null otherwise
+ */
+export async function getExistingBid(
+    loadRequestId: string,
+    transporterId: string,
+    projectName: string
+): Promise<{ bid: Bid; canEdit: boolean } | null> {
+    const db = (await getHealthyDbInstances())[projectName];
+    if (!db) {
+        throw new Error(`Database for project ${projectName} is not available`);
+    }
+
+    const query = await retryDatabaseOperation(async () => {
+        return await db.collection('bids')
+            .where('loadRequestId', '==', loadRequestId)
+            .where('transporterId', '==', transporterId)
+            .limit(1)
+            .get();
+    }, 2, 1000, projectName);
+
+    if (query.empty) {
+        return null;
+    }
+
+    const doc = query.docs[0];
+    if (!doc) {
+        return null;
+    }
+
+    const bid = { id: doc.id, ...doc.data() } as Bid;
+    
+    // Can edit if bid is not accepted
+    const canEdit = bid.status !== BidStatus.ACCEPTED;
+    
+    return { bid, canEdit };
+}
+
+/**
+ * Update an existing bid
+ */
+export async function updateBid(
+    bidId: string,
+    updates: {
+        bidAmount?: number;
+        numberOfTrucks?: number;
+    },
+    projectName: string
+): Promise<Bid> {
+    const db = (await getHealthyDbInstances())[projectName];
+    if (!db) {
+        throw new Error(`Database for project ${projectName} is not available`);
+    }
+
+    const now = new Date().toISOString();
+    const updateData: Record<string, unknown> = {
+        updatedAt: admin.firestore.Timestamp.fromDate(new Date(now))
+    };
+
+    if (updates.bidAmount !== undefined) {
+        updateData['pricing.amount'] = updates.bidAmount;
+        // Add to offer history
+        updateData['offerHistory'] = admin.firestore.FieldValue.arrayUnion({
+            id: crypto.randomUUID(),
+            amount: updates.bidAmount,
+            currency: 'ETB',
+            type: 'initial',
+            offeredBy: 'transporter',
+            offeredByName: 'Transporter',
+            timestamp: now
+        });
+    }
+
+    if (updates.numberOfTrucks !== undefined) {
+        updateData['trucksProvided'] = updates.numberOfTrucks;
+    }
+
+    await retryDatabaseOperation(async () => {
+        await db.collection('bids').doc(bidId).update(updateData);
+    }, 2, 1000, projectName);
+
+    // Fetch and return updated bid
+    const doc = await retryDatabaseOperation(async () => {
+        return await db.collection('bids').doc(bidId).get();
+    }, 2, 1000, projectName);
+
+    return { id: doc.id, ...doc.data() } as Bid;
 }
 
 /**

@@ -10,6 +10,7 @@ interface PendingBid {
     transporterPhone: string;
     projectName: string;
     timestamp: number;
+    existingBidId?: string | undefined; // Track if editing existing bid
 }
 
 // In-memory storage for pending bids (could use Redis in production)
@@ -195,6 +196,17 @@ export function getPendingBid(chatId: number): PendingBid | undefined {
  */
 export function setPendingBid(chatId: number, bid: PendingBid): void {
     pendingBids.set(chatId, bid);
+}
+
+/**
+ * Set pending bid for a chat with existing bid ID (for editing)
+ */
+export function setPendingBidWithExistingId(chatId: number, bid: PendingBid, existingBidId?: string): void {
+    const pendingBidWithId: PendingBid = {
+        ...bid,
+        existingBidId: existingBidId || undefined
+    };
+    pendingBids.set(chatId, pendingBidWithId);
 }
 
 /**

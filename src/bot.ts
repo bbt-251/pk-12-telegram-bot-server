@@ -1,10 +1,10 @@
 // Telegram Bot for Cargo Bidding System
-import { findTransporterByPhoneNumber, updateTransporterChatId, findTransporterByChatId } from './services/transporter-service';
-import { handleCallbackQuery, setPendingBid } from './handlers/callback-handler';
-import { getLoadRequestById, hasExistingBid } from './services/bid-service';
-import { handleMessage } from './handlers/message-handler';
-import { Contact, TelegramMessage, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove } from './types/telegram';
 import TelegramBot from 'node-telegram-bot-api';
+import { handleCallbackQuery, setPendingBid, setPendingBidWithExistingId } from './handlers/callback-handler';
+import { handleMessage } from './handlers/message-handler';
+import { getExistingBid, getLoadRequestById } from './services/bid-service';
+import { findTransporterByChatId, findTransporterByPhoneNumber, updateTransporterChatId } from './services/transporter-service';
+import { Contact, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove, TelegramMessage } from './types/telegram';
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
@@ -94,7 +94,7 @@ async function handleBidDeepLink(chatId: number, loadRequestId: string): Promise
     try {
         // Find transporter by chat ID
         const result = await findTransporterByChatId(chatId);
-        
+
         if (!result) {
             await sendMessage(chatId, '❌ You must be a registered transporter to place bids. Please use /start to verify your phone number.');
             return;
@@ -121,12 +121,53 @@ async function handleBidDeepLink(chatId: number, loadRequestId: string): Promise
             return;
         }
 
-        // Check if already bid
-        const existingBid = await hasExistingBid(loadRequestId, transporter.id, projectName);
+        // Check if already bid and if it can be edited
+        const existingBidResult = await getExistingBid(loadRequestId, transporter.id, projectName);
 
-        if (existingBid) {
-            await sendMessage(chatId, '❌ You have already placed a bid on this load request.');
+        if (existingBidResult) {
+            const { bid, canEdit } = existingBidResult;
+
+            if (canEdit) {
+                // Allow editing existing bid
+                await sendMessage(
+                    chatId,
+                    `📝 You already have a bid on this load request.\n\n` +
+                    `Current bid: ETB ${bid.pricing.amount.toLocaleString()}\n` +
+                    `Trucks: ${bid.trucksProvided}\n\n` +
+                    `You can edit your bid by entering new values below:`,
+                    {
+                        inline_keyboard: [
+                            [{ text: '❌ Cancel', callback_data: `cancel_bid_${loadRequestId}` }]
+                        ]
+                    }
+                );
+
+                // Store pending bid with existing bid ID for editing
+                setPendingBidWithExistingId(chatId, {
+                    loadRequestId,
+                    transporterId: transporter.id,
+                    transporterName: transporter.firstName,
+                    transporterPhone: transporter.phone,
+                    projectName,
+                    timestamp: Date.now()
+                }, bid.id);
+            } else {
+                // Bid is accepted, cannot edit
+                await sendMessage(chatId, '❌ Your bid on this load request has been accepted and cannot be modified.');
+            }
             return;
+        }
+
+        // Check bid deadline
+        const bidDeadline = loadRequest.biddingSettings?.bidDeadline;
+        if (bidDeadline) {
+            const deadline = new Date(bidDeadline);
+            const now = new Date();
+
+            if (now > deadline) {
+                await sendMessage(chatId, `❌ The bidding deadline for this load request has passed.\n\nDeadline: ${deadline.toLocaleString()}`);
+                return;
+            }
         }
 
         // Store pending bid state
