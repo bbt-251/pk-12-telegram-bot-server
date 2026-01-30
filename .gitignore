@@ -1,0 +1,8 @@
+node_modules
+.env
+dist
+docs
+config
+firebase-debug.log
+TELEGRAM_BOT_DEEP_LINK_UPDATE.md
+TELEGRAM_BOT_IMPLEMENTATION_PLAN.md
