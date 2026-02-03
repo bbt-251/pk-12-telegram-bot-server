@@ -2,6 +2,7 @@ import TelegramBot from 'node-telegram-bot-api';
 import { findTransporterByChatId } from '../services/transporter-service';
 import { getLoadRequestById, hasExistingBid } from '../services/bid-service';
 import { sendMessage } from '../bot';
+import { confirmBid, restartBidFlow } from './message-handler';
 
 interface PendingBid {
     loadRequestId: string;
@@ -34,7 +35,11 @@ export async function handleCallbackQuery(
         const loadRequestId = data.replace('place_bid_', '');
         await handlePlaceBidCallback(bot, callbackId, loadRequestId, chatId, userId);
     } else if (data.startsWith('cancel_bid_')) {
-        await handleCancelBidCallback(bot, callbackId,  chatId, userId);
+        await handleCancelBidCallback(bot, callbackId, chatId, userId);
+    } else if (data.startsWith('confirm_bid_')) {
+        await handleConfirmBidCallback(bot, callbackId, chatId, userId);
+    } else if (data.startsWith('edit_bid_')) {
+        await handleEditBidCallback(bot, callbackId, chatId, userId);
     } else {
         // Answer callback to remove loading state
         await bot.answerCallbackQuery(callbackId);
@@ -185,6 +190,46 @@ async function handleCancelBidCallback(
 }
 
 /**
+ * Handle "Confirm Bid" button click
+ */
+async function handleConfirmBidCallback(
+    bot: TelegramBot,
+    callbackId: string,
+    chatId: number,
+    userId?: number
+): Promise<void> {
+    // Use userId (user's private chat ID)
+    const userChatId = userId || chatId;
+
+    await bot.sendMessage(userChatId, "⌛ Please wait while we process your bid...");
+
+    // Answer callback to remove loading state
+    await bot.answerCallbackQuery(callbackId);
+
+    // Confirm and submit the bid
+    await confirmBid(userChatId);
+}
+
+/**
+ * Handle "Edit Bid" button click
+ */
+async function handleEditBidCallback(
+    bot: TelegramBot,
+    callbackId: string,
+    chatId: number,
+    userId?: number
+): Promise<void> {
+    // Use userId (user's private chat ID)
+    const userChatId = userId || chatId;
+
+    // Answer callback to remove loading state
+    await bot.answerCallbackQuery(callbackId);
+
+    // Restart the bid flow
+    await restartBidFlow(userChatId);
+}
+
+/**
  * Get pending bid for a chat
  */
 export function getPendingBid(chatId: number): PendingBid | undefined {
@@ -214,6 +259,16 @@ export function setPendingBidWithExistingId(chatId: number, bid: PendingBid, exi
  */
 export function clearPendingBid(chatId: number): void {
     pendingBids.delete(chatId);
+}
+
+/**
+ * Update pending bid for a chat (e.g., to remove existingBidId)
+ */
+export function updatePendingBid(chatId: number, updates: Partial<PendingBid>): void {
+    const existing = pendingBids.get(chatId);
+    if (existing) {
+        pendingBids.set(chatId, { ...existing, ...updates });
+    }
 }
 
 /**
