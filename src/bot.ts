@@ -145,6 +145,7 @@ async function handleBidDeepLink(chatId: number, loadRequestId: string): Promise
                 // Store pending bid with existing bid ID for editing
                 setPendingBidWithExistingId(chatId, {
                     loadRequestId,
+                    displayID: loadRequest.displayID,
                     transporterId: transporter.id,
                     transporterName: transporter.firstName,
                     transporterPhone: transporter.phone,
@@ -173,6 +174,7 @@ async function handleBidDeepLink(chatId: number, loadRequestId: string): Promise
         // Store pending bid state
         setPendingBid(chatId, {
             loadRequestId,
+            displayID: loadRequest.displayID,
             transporterId: transporter.id,
             transporterName: transporter.firstName,
             transporterPhone: transporter.phone,

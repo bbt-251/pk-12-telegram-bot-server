@@ -175,6 +175,13 @@ export interface LoadRequestCargoTotals {
     totalVolume: string;
 }
 
+// Lowest bid info for Telegram display
+export interface LowestBidInfo {
+    amount: number;
+    currency: string;
+    updatedAt: string;
+}
+
 // Main Load Request document
 export interface LoadRequest {
     id: string;
@@ -196,6 +203,7 @@ export interface LoadRequest {
     transporterResponses?: Record<string, TransporterResponseStatus>;
     negotiationHistory?: NegotiationEntry[];
     telegramMessageId?: number;
+    lowestBid?: LowestBidInfo;
 }
 
 // Input type for creating a load request (without id and timestamps)

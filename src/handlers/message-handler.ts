@@ -1,6 +1,6 @@
 import TelegramBot from 'node-telegram-bot-api';
 import { sendMessage } from '../bot';
-import { createBid, updateBid } from '../services/bid-service';
+import { createBid, updateBid, updateLowestBidAndTelegram } from '../services/bid-service';
 import { clearPendingBid, getPendingBid } from './callback-handler';
 
 interface BidState {
@@ -44,6 +44,7 @@ async function handleBidFlow(
     text: string,
     pendingBid: {
         loadRequestId: string;
+        displayID: string;
         transporterId: string;
         transporterName: string;
         transporterPhone: string;
@@ -119,6 +120,18 @@ async function handleBidFlow(
                 );
             }
 
+            // Update lowest bid and Telegram message
+            try {
+                await updateLowestBidAndTelegram(
+                    pendingBid.loadRequestId,
+                    state.bidAmount!,
+                    pendingBid.projectName
+                );
+            } catch (updateError) {
+                console.error('Error updating lowest bid and Telegram:', updateError);
+                // Don't fail the bid creation if this fails
+            }
+
             // Clear pending bid and state
             clearPendingBid(chatId);
             bidStates.delete(chatId);
@@ -128,7 +141,7 @@ async function handleBidFlow(
             await sendMessage(
                 chatId,
                 `✅ Bid ${actionText} successfully!\n\n` +
-                `📦 Load Request: #${pendingBid.loadRequestId}\n` +
+                `📦 Load Request: #${pendingBid.displayID}\n` +
                 `💰 Bid Amount: ETB ${state.bidAmount!.toLocaleString()}\n` +
                 `🚛 Number of Trucks: ${trucks}\n\n` +
                 `The cargo owner will review your bid. You will be notified if your bid is accepted.`,

@@ -5,6 +5,7 @@ import { sendMessage } from '../bot';
 
 interface PendingBid {
     loadRequestId: string;
+    displayID: string; // Human-readable display ID
     transporterId: string;
     transporterName: string;
     transporterPhone: string;
@@ -116,6 +117,7 @@ async function handlePlaceBidCallback(
         // Store pending bid state using user's private chat ID
         pendingBids.set(userChatId, {
             loadRequestId,
+            displayID: loadRequest.displayID,
             transporterId: transporter.id,
             transporterName: transporter.firstName,
             transporterPhone: transporter.phone,
