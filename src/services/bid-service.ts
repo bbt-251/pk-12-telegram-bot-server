@@ -198,6 +198,28 @@ export async function getLoadRequestById(
 }
 
 /**
+ * Get all bids by a specific transporter
+ */
+export async function getBidsByTransporter(
+    transporterId: string,
+    projectName: string
+): Promise<Bid[]> {
+    const db = (await getHealthyDbInstances())[projectName];
+    if (!db) {
+        throw new Error(`Database for project ${projectName} is not available`);
+    }
+
+    const query = await retryDatabaseOperation(async () => {
+        return await db.collection('bids')
+            .where('transporterId', '==', transporterId)
+            .orderBy('createdAt', 'desc')
+            .get();
+    }, 2, 1000, projectName);
+
+    return query.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bid));
+}
+
+/**
  * Get all bids for a load request
  */
 export async function getBidsForLoadRequest(

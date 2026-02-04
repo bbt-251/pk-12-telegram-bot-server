@@ -1,8 +1,9 @@
 import TelegramBot from 'node-telegram-bot-api';
 import { findTransporterByChatId } from '../services/transporter-service';
-import { getLoadRequestById, hasExistingBid } from '../services/bid-service';
+import { getLoadRequestById, hasExistingBid, getBidsByTransporter } from '../services/bid-service';
 import { sendMessage } from '../bot';
 import { confirmBid, restartBidFlow } from './message-handler';
+import { formatDate } from '../dayjs_util';
 
 interface PendingBid {
     loadRequestId: string;
@@ -40,6 +41,8 @@ export async function handleCallbackQuery(
         await handleConfirmBidCallback(bot, callbackId, chatId, userId);
     } else if (data.startsWith('edit_bid_')) {
         await handleEditBidCallback(bot, callbackId, chatId, userId);
+    } else if (data === 'view_my_bids') {
+        await handleViewMyBidsCallback(bot, callbackId, chatId, userId);
     } else {
         // Answer callback to remove loading state
         await bot.answerCallbackQuery(callbackId);
@@ -227,6 +230,76 @@ async function handleEditBidCallback(
 
     // Restart the bid flow
     await restartBidFlow(userChatId);
+}
+
+/**
+ * Handle "View My Bids" button click
+ */
+async function handleViewMyBidsCallback(
+    bot: TelegramBot,
+    callbackId: string,
+    chatId: number,
+    userId?: number
+): Promise<void> {
+    // Use userId (user's private chat ID)
+    const userChatId = userId || chatId;
+
+    // Answer callback to remove loading state
+    await bot.answerCallbackQuery(callbackId);
+
+    // Find transporter
+    const result = await findTransporterByChatId(userChatId);
+    if (!result) {
+        await sendMessage(userChatId, '❌ You must be a registered transporter to view bids. Please use /start to verify your phone number.');
+        return;
+    }
+
+    const { transporter, projectName } = result;
+
+    // Get all bids by this transporter
+    const bids = await getBidsByTransporter(transporter.uid, projectName);
+
+    if (bids.length === 0) {
+        await sendMessage(userChatId, '📋 You haven\'t placed any bids yet. Browse load requests to place your first bid!');
+        return;
+    }
+
+    // Format the bids message (using HTML for compatibility with sendMessage)
+    let message = `📋 <b>Your Bids</b>\n\n`;
+
+    for (const bid of bids) {
+        // Get load request info
+        const loadRequest = await getLoadRequestById(bid.loadRequestID, projectName);
+        const displayID = loadRequest?.displayID || bid.loadRequestID;
+
+        // Format status with emoji
+        const statusEmoji: Record<string, string> = {
+            'Pending': '⏳',
+            'Accepted': '✅',
+            'Rejected': '❌',
+            'Counter Offer': '💰',
+            'Withdrawn': '🚫',
+            'Expired': '⏰'
+        };
+
+        const emoji = statusEmoji[bid.status] || '📌';
+
+        message += `${emoji} <b>${displayID}</b>\n`;
+        message += `💰 Bid: ETB ${bid.pricing.amount.toLocaleString()}\n`;
+        message += `🚛 Trucks: ${bid.trucksProvided}\n`;
+        message += `📊 Status: ${bid.status}\n`;
+        message += `📅 Date: ${formatDate(bid.createdAt.toDate())}\n`;
+
+        if (loadRequest) {
+            message += `📍 ${loadRequest.route.origin} → ${loadRequest.route.destination}\n`;
+        }
+
+        message += `\n`;
+    }
+
+    message += `Total Bids: ${bids.length}`;
+
+    await sendMessage(userChatId, message);
 }
 
 /**
