@@ -252,6 +252,17 @@ function createContactKeyboard() {
     };
 }
 
+// Keyboard markup for authenticated users with View My Bids button
+function createAuthenticatedKeyboard() {
+    return {
+        keyboard: [
+            [{ text: '📋 View My Bids' }]
+        ],
+        resize_keyboard: true,
+        one_time_keyboard: false
+    };
+}
+
 // Send message with optional keyboard
 export async function sendMessage(
     chatId: number,
@@ -304,7 +315,7 @@ async function handleContactShare(chatId: number, contact: Contact): Promise<voi
             const updateSuccess = await updateTransporterChatId(transporter.id, chatId, projectName);
 
             if (updateSuccess) {
-                // Send success message
+                // Send success message with authenticated keyboard
                 await sendMessage(
                     chatId,
                     `✅ Phone verified successfully!\n\n` +
@@ -312,7 +323,7 @@ async function handleContactShare(chatId: number, contact: Contact): Promise<voi
                     `📱 Phone: ${normalizedPhone}\n` +
                     `🏢 Company: ${transporter.companyName || 'N/A'}\n\n` +
                     `You can now place bids on load requests by clicking "Place Bid" button on posts in @pkdouze channel.`,
-                    { remove_keyboard: true }
+                    createAuthenticatedKeyboard()
                 );
                 console.log(`Successfully linked transporter ${transporter.id} to chat ${chatId}`);
             } else {

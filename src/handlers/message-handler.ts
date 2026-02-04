@@ -1,7 +1,7 @@
 import TelegramBot from 'node-telegram-bot-api';
 import { sendMessage } from '../bot';
 import { createBid, updateBid, updateLowestBidAndTelegram } from '../services/bid-service';
-import { clearPendingBid, getPendingBid, updatePendingBid } from './callback-handler';
+import { clearPendingBid, getPendingBid, updatePendingBid, handleViewMyBidsText } from './callback-handler';
 
 interface BidState {
     step: 'amount' | 'trucks' | 'confirm';
@@ -28,6 +28,12 @@ export async function handleMessage(
     text: string
 ): Promise<void> {
     console.log(`📨 Received message: "${text}" from chat ${chatId}`);
+
+    // Handle "View My Bids" text button
+    if (text === '📋 View My Bids') {
+        await handleViewMyBidsText(chatId);
+        return;
+    }
 
     // Check if user is in the middle of placing a bid
     const pendingBid = getPendingBid(chatId);

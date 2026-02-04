@@ -233,7 +233,7 @@ async function handleEditBidCallback(
 }
 
 /**
- * Handle "View My Bids" button click
+ * Handle "View My Bids" button click (callback query)
  */
 async function handleViewMyBidsCallback(
     bot: TelegramBot,
@@ -247,10 +247,27 @@ async function handleViewMyBidsCallback(
     // Answer callback to remove loading state
     await bot.answerCallbackQuery(callbackId);
 
+    // Display the bids
+    await displayUserBids(userChatId);
+}
+
+/**
+ * Handle "View My Bids" text message (keyboard button)
+ */
+export async function handleViewMyBidsText(
+    chatId: number
+): Promise<void> {
+    await displayUserBids(chatId);
+}
+
+/**
+ * Display user's bids (shared logic for callback and text)
+ */
+async function displayUserBids(chatId: number): Promise<void> {
     // Find transporter
-    const result = await findTransporterByChatId(userChatId);
+    const result = await findTransporterByChatId(chatId);
     if (!result) {
-        await sendMessage(userChatId, '❌ You must be a registered transporter to view bids. Please use /start to verify your phone number.');
+        await sendMessage(chatId, '❌ You must be a registered transporter to view bids. Please use /start to verify your phone number.');
         return;
     }
 
@@ -260,7 +277,7 @@ async function handleViewMyBidsCallback(
     const bids = await getBidsByTransporter(transporter.uid, projectName);
 
     if (bids.length === 0) {
-        await sendMessage(userChatId, '📋 You haven\'t placed any bids yet. Browse load requests to place your first bid!');
+        await sendMessage(chatId, '📋 You haven\'t placed any bids yet. Browse load requests to place your first bid!');
         return;
     }
 
@@ -299,7 +316,7 @@ async function handleViewMyBidsCallback(
 
     message += `Total Bids: ${bids.length}`;
 
-    await sendMessage(userChatId, message);
+    await sendMessage(chatId, message);
 }
 
 /**
