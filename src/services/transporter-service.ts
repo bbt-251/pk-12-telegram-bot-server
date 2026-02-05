@@ -2,9 +2,9 @@ import { getHealthyDbInstances, retryDatabaseOperation } from '../firebase-confi
 import { UserModel } from '../models/user';
 
 /**
- * Find transporter by phone number
+ * Find transporter or broker by phone number
  */
-export async function findTransporterByPhoneNumber(
+export async function findUserByPhoneNumber(
     phoneNumber: string
 ): Promise<{ transporter: UserModel; projectName: string } | null> {
     const healthyDbs = await getHealthyDbInstances();
@@ -16,6 +16,7 @@ export async function findTransporterByPhoneNumber(
             const query = await retryDatabaseOperation(async () => {
                 return await transportersRef
                     .where('phone', '==', phoneNumber)
+                    .where('role', 'in', ['transporter', 'broker'])
                     .limit(1)
                     .get();
             }, 2, 1000, projectName);

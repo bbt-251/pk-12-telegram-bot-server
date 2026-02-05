@@ -3,7 +3,7 @@ import TelegramBot from 'node-telegram-bot-api';
 import { handleCallbackQuery, setPendingBid, setPendingBidWithExistingId } from './handlers/callback-handler';
 import { handleMessage } from './handlers/message-handler';
 import { getExistingBid, getLoadRequestById } from './services/bid-service';
-import { findTransporterByChatId, findTransporterByPhoneNumber, updateTransporterChatId } from './services/transporter-service';
+import { findTransporterByChatId, findUserByPhoneNumber, updateTransporterChatId } from './services/transporter-service';
 import { Contact, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove, TelegramMessage } from './types/telegram';
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -75,7 +75,7 @@ bot.onText(/\/start (.*)/, async (msg: TelegramMessage, match: RegExpExecArray |
         console.log(`📦 Deep link detected for load request: ${loadRequestId}`);
         await handleBidDeepLink(chatId, loadRequestId);
     } else {
-        // Regular /start - request phone verification
+        // Regular /start - request phone verification for transporters/brokers
         sendContactRequest(chatId);
     }
 });
@@ -287,7 +287,7 @@ async function sendContactRequest(chatId: number): Promise<TelegramBot.Message> 
     const keyboard = createContactKeyboard();
     return sendMessage(
         chatId,
-        '👋 Welcome to Cargo Bidding Bot!\n\nTo place bids on load requests, please share your phone number so we can verify your transporter account.',
+        '👋 Welcome to Cargo Bidding Bot!\n\nTo place bids on load requests, please share your phone number so we can verify your transporter or broker account.',
         keyboard
     );
 }
@@ -305,8 +305,8 @@ async function handleContactShare(chatId: number, contact: Contact): Promise<voi
         // Send initial verification message
         await sendMessage(chatId, '⏳ Please wait while we verify your phone number...');
 
-        // Search for transporter across all Firebase projects
-        const result = await findTransporterByPhoneNumber(normalizedPhone);
+        // Search for transporter/broker across all Firebase projects
+        const result = await findUserByPhoneNumber(normalizedPhone);
 
         if (result) {
             const { transporter, projectName } = result;
@@ -322,7 +322,7 @@ async function handleContactShare(chatId: number, contact: Contact): Promise<voi
                     `👤 Name: ${transporter.firstName} ${transporter.lastName}\n` +
                     `📱 Phone: ${normalizedPhone}\n` +
                     `🏢 Company: ${transporter.companyName || 'N/A'}\n\n` +
-                    `You can now place bids on load requests by clicking "Place Bid" button on posts in @pkdouze channel.`,
+                    `You can now place bids on load requests.`,
                     createAuthenticatedKeyboard()
                 );
                 console.log(`Successfully linked transporter ${transporter.id} to chat ${chatId}`);
@@ -330,10 +330,11 @@ async function handleContactShare(chatId: number, contact: Contact): Promise<voi
                 await sendMessage(chatId, '❌ Failed to link your account. Please try again or contact support.');
             }
         } else {
-            // Transporter not found
+            // User not found or not a transporter/broker
             await sendMessage(
                 chatId,
-                '❌ Transporter account not found.\n\n' +
+                '❌ Account not found.\n\n' +
+                'Only transporters and brokers can use this bot. ' +
                 'Please ensure you are sharing the same phone number registered in the system, or contact your administrator for assistance.',
                 { remove_keyboard: true }
             );

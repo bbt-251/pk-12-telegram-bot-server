@@ -3,6 +3,7 @@ import type { firestore } from 'firebase-admin';
 export enum UserRole {
     CARGO_OWNER = "cargo_owner",
     TRANSPORTER = "transporter",
+    BROKER = "broker",
     ADMIN = "admin",
 }
 
