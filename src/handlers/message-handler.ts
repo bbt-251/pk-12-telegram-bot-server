@@ -6,7 +6,7 @@ import {
     getPendingBid,
     updatePendingBid,
     handleViewMyBidsText,
-    CounterOfferState
+    getCounterOfferStateByChatId
 } from './callback-handler';
 
 interface BidState {
@@ -24,9 +24,6 @@ interface BidState {
 
 // In-memory storage for bid state
 const bidStates = new Map<number, BidState>();
-
-// In-memory storage for counter offer state
-const counterOfferStates = new Map<number, CounterOfferState>();
 
 /**
  * Handle text messages from users
@@ -300,27 +297,6 @@ export function clearBidState(chatId: number): void {
 }
 
 /**
- * Set counter offer state for a chat
- */
-export function setCounterOfferState(chatId: number, state: CounterOfferState): void {
-    counterOfferStates.set(chatId, state);
-}
-
-/**
- * Get counter offer state for a chat
- */
-export function getCounterOfferState(chatId: number): CounterOfferState | undefined {
-    return counterOfferStates.get(chatId);
-}
-
-/**
- * Clear counter offer state for a chat
- */
-export function clearCounterOfferState(chatId: number): void {
-    counterOfferStates.delete(chatId);
-}
-
-/**
  * Handle counter offer amount input from user
  */
 export async function handleCounterOfferAmount(
@@ -336,7 +312,7 @@ export async function handleCounterOfferAmount(
     }
 
     // Get counter offer state
-    const state = getCounterOfferState(chatId);
+    const state = getCounterOfferStateByChatId(chatId);
     if (!state) {
         await sendMessage(chatId, '❌ Counter offer session expired. Please start over.');
         return;

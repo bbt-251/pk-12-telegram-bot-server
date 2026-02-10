@@ -572,12 +572,16 @@ async function handleCounterOfferCallback(
             return;
         }
 
-        // Store counter offer state for this user
+        // Get the load request to fetch the display ID
+        const loadRequest = await getLoadRequestById(bid.loadRequestID, projectName);
+        const displayID = loadRequest?.displayID || bid.loadRequestID;
+
+        // Store counter offer state for this user with correct display ID
         counterOfferStates.set(userChatId, {
             bidId,
             transporterId: transporter.id,
             projectName,
-            loadRequestDisplayID: bid.loadRequestID,
+            loadRequestDisplayID: displayID,
             counterAmount: 0,
             originalBidAmount: bid.pricing.amount,
             timestamp: Date.now()
@@ -590,21 +594,12 @@ async function handleCounterOfferCallback(
         await sendMessage(
             userChatId,
             `💰 Enter your counter-offer amount:\n\n` +
-            `📦 Load Request: #${bid.loadRequestID}\n` +
+            `📦 Load Request: #${displayID}\n` +
             `💰 Current Offer: ETB ${bid.pricing.amount.toLocaleString()}\n\n` +
             `Please enter your counter-offer amount (ETB):`
         );
 
-        // Set up counter offer state for message handler
-        setCounterOfferStateByChatId(userChatId, {
-            bidId,
-            transporterId: transporter.id,
-            projectName,
-            loadRequestDisplayID: bid.loadRequestID,
-            counterAmount: 0,
-            originalBidAmount: bid.pricing.amount,
-            timestamp: Date.now()
-        });
+        console.log(`✅ Started counter offer flow for bid ${bidId}`);
 
         console.log(`✅ Started counter offer flow for bid ${bidId}`);
     } catch (error) {
