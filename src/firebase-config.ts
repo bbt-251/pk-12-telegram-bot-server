@@ -1,6 +1,7 @@
 import admin from 'firebase-admin';
 import type { ServiceAccount } from 'firebase-admin'
 import type { firestore } from 'firebase-admin'
+import crypto from 'crypto'
 
 // Define extended ServiceAccount to include project_id since JSON has it
 interface ExtendedServiceAccount extends ServiceAccount {
@@ -13,8 +14,64 @@ interface FirebaseConfig {
     name: string
 }
 
+// External app configuration
+const firebaseConfig = {
+    dev: {
+        apiKey: "AIzaSyBlHYQ1SfBMxyccs5HAYG9fgXTAKntx_80",
+        authDomain: "pk-12-development.firebaseapp.com",
+        projectId: "pk-12-development",
+        storageBucket: "pk-12-development.firebasestorage.app",
+        messagingSenderId: "1000739929509",
+        appId: "1:1000739929509:web:7673409efee40552983c4c",
+        adminEnvKey: "NEXT_PUBLIC_FIREBASE_ADMIN_DEVELOPMENT",
+        domain: "https://pk-12-dev.vercel.app"
+    },
+    int: {
+        apiKey: "AIzaSyDzh00Bo-FKP5GS5Tr_TDdM_wGz-DinVnE",
+        authDomain: "pk-12-13035.firebaseapp.com",
+        projectId: "pk-12-13035",
+        storageBucket: "pk-12-13035.firebasestorage.app",
+        messagingSenderId: "1001325999246",
+        appId: "1:1001325999246:web:b7284725a1b72e5dd385df",
+        adminEnvKey: "NEXT_PUBLIC_FIREBASE_ADMIN_INT",
+        domain: "https://int.pkdouze.com"
+    }
+}
+
+// Use development config by default
+export const externalAppConfig = firebaseConfig.dev
+
+/**
+ * Generate auth token for external transport details form
+ */
+export function generateExternalAuthToken(bidID: string, userUID: string): string {
+    const secret = process.env.EXTERNAL_API_SECRET
+    if (!secret) {
+        console.error('EXTERNAL_API_SECRET not configured')
+        return ''
+    }
+
+    const timestamp = Date.now().toString()
+    const data = `${bidID}${userUID}${timestamp}`
+    const token = crypto
+        .createHmac('sha256', secret)
+        .update(data)
+        .digest('hex')
+
+    return `${timestamp}_${token}`
+}
+
+/**
+ * Get external transport details URL
+ */
+export function getExternalTransportDetailsUrl(bidID: string, userUID: string): string {
+    const authToken = generateExternalAuthToken(bidID, userUID)
+    const url = `${externalAppConfig.domain}/external/${bidID}/${userUID}?authToken=${authToken}`
+    return url
+}
+
 // Manually defined prefixes to match the .env variables
-const prefixes = ['DEVELOPMENT', 'DEV', 'INT', 'VALIDATION', 'CARGOLINK_DEV', 'CARGOLINK_INT', 'CARGOLINK_VAL', 'KOMARI', 'KOMARI_VAL']
+const prefixes = ['DEVELOPMENT', 'INT',]
 
 // Store Firestore db instances
 const dbInstances: Record<string, any> = {} // eslint-disable-line @typescript-eslint/no-explicit-any

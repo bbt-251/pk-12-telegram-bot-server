@@ -1,7 +1,13 @@
 import TelegramBot from 'node-telegram-bot-api';
 import { sendMessage } from '../bot';
 import { createBid, updateBid, updateLowestBidAndTelegram } from '../services/bid-service';
-import { clearPendingBid, getPendingBid, updatePendingBid, handleViewMyBidsText } from './callback-handler';
+import {
+    clearPendingBid,
+    getPendingBid,
+    updatePendingBid,
+    handleViewMyBidsText,
+    CounterOfferState
+} from './callback-handler';
 
 interface BidState {
     step: 'amount' | 'trucks' | 'confirm';
@@ -18,6 +24,9 @@ interface BidState {
 
 // In-memory storage for bid state
 const bidStates = new Map<number, BidState>();
+
+// In-memory storage for counter offer state
+const counterOfferStates = new Map<number, CounterOfferState>();
 
 /**
  * Handle text messages from users
@@ -288,4 +297,69 @@ export async function restartBidFlow(
  */
 export function clearBidState(chatId: number): void {
     bidStates.delete(chatId);
+}
+
+/**
+ * Set counter offer state for a chat
+ */
+export function setCounterOfferState(chatId: number, state: CounterOfferState): void {
+    counterOfferStates.set(chatId, state);
+}
+
+/**
+ * Get counter offer state for a chat
+ */
+export function getCounterOfferState(chatId: number): CounterOfferState | undefined {
+    return counterOfferStates.get(chatId);
+}
+
+/**
+ * Clear counter offer state for a chat
+ */
+export function clearCounterOfferState(chatId: number): void {
+    counterOfferStates.delete(chatId);
+}
+
+/**
+ * Handle counter offer amount input from user
+ */
+export async function handleCounterOfferAmount(
+    _bot: TelegramBot,
+    chatId: number,
+    amountText: string
+): Promise<void> {
+    const amount = parseFloat(amountText.trim());
+
+    if (isNaN(amount) || amount <= 0) {
+        await sendMessage(chatId, '❌ Please enter a valid counter-offer amount (e.g., 5000)');
+        return;
+    }
+
+    // Get counter offer state
+    const state = getCounterOfferState(chatId);
+    if (!state) {
+        await sendMessage(chatId, '❌ Counter offer session expired. Please start over.');
+        return;
+    }
+
+    // Update state with counter amount
+    state.counterAmount = amount;
+
+    // Show confirmation with buttons
+    await sendMessage(
+        chatId,
+        `💰 Confirm your counter-offer:\n\n` +
+        `📦 Load Request: #${state.loadRequestDisplayID}\n` +
+        `💰 Original Bid: ETB ${state.originalBidAmount.toLocaleString()}\n` +
+        `💰 Your Counter-Offer: ETB ${amount.toLocaleString()}\n\n` +
+        `Do you want to proceed?`,
+        {
+            inline_keyboard: [
+                [
+                    { text: '✅ Confirm', callback_data: `confirm_counter_${state.bidId}_${amount}` },
+                    { text: '❌ Cancel', callback_data: `cancel_counter_${state.bidId}` }
+                ]
+            ]
+        }
+    );
 }

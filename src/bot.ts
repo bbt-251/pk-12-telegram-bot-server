@@ -1,7 +1,7 @@
 // Telegram Bot for Cargo Bidding System
 import TelegramBot from 'node-telegram-bot-api';
-import { handleCallbackQuery, setPendingBid, setPendingBidWithExistingId } from './handlers/callback-handler';
-import { handleMessage } from './handlers/message-handler';
+import { handleCallbackQuery, setPendingBid, setPendingBidWithExistingId, getCounterOfferStateByChatId } from './handlers/callback-handler';
+import { handleMessage, handleCounterOfferAmount } from './handlers/message-handler';
 import { getExistingBid, getLoadRequestById } from './services/bid-service';
 import { findTransporterByChatId, findUserByPhoneNumber, updateTransporterChatId } from './services/transporter-service';
 import { Contact, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove, TelegramMessage } from './types/telegram';
@@ -45,7 +45,13 @@ bot.on('message', (msg: TelegramMessage) => {
     }
     // Handle other text messages
     else {
-        handleMessage(bot, chatId, text);
+        // Check if user is in counter offer flow
+        const counterOfferState = getCounterOfferStateByChatId(chatId);
+        if (counterOfferState && counterOfferState.counterAmount === 0) {
+            handleCounterOfferAmount(bot, chatId, text);
+        } else {
+            handleMessage(bot, chatId, text);
+        }
     }
 });
 

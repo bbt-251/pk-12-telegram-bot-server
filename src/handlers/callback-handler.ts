@@ -1,9 +1,17 @@
 import TelegramBot from 'node-telegram-bot-api';
 import { findTransporterByChatId } from '../services/transporter-service';
-import { getLoadRequestById, hasExistingBid, getBidsByTransporter } from '../services/bid-service';
+import {
+    getLoadRequestById,
+    hasExistingBid,
+    getBidsByTransporter,
+    getBidById,
+    acceptCounterOffer,
+    transporterCounterOffer
+} from '../services/bid-service';
 import { sendMessage } from '../bot';
 import { confirmBid, restartBidFlow } from './message-handler';
 import { formatDate } from '../dayjs_util';
+import { getExternalTransportDetailsUrl } from '../firebase-config';
 
 interface PendingBid {
     loadRequestId: string;
@@ -18,6 +26,22 @@ interface PendingBid {
 
 // In-memory storage for pending bids (could use Redis in production)
 const pendingBids = new Map<number, PendingBid>();
+
+/**
+ * Counter offer state for handling counter offer flow
+ */
+export interface CounterOfferState {
+    bidId: string;
+    transporterId: string;
+    projectName: string;
+    loadRequestDisplayID: string;
+    counterAmount: number;
+    originalBidAmount: number;
+    timestamp: number;
+}
+
+// In-memory storage for counter offer states
+const counterOfferStates = new Map<number, CounterOfferState>();
 
 /**
  * Handle callback queries from Telegram inline buttons
@@ -43,6 +67,14 @@ export async function handleCallbackQuery(
         await handleEditBidCallback(bot, callbackId, chatId, userId);
     } else if (data === 'view_my_bids') {
         await handleViewMyBidsCallback(bot, callbackId, chatId, userId);
+    } else if (data.startsWith('ac:')) {
+        await handleAcceptCounterCallback(bot, callbackId, data, chatId, userId);
+    } else if (data.startsWith('co:')) {
+        await handleCounterOfferCallback(bot, callbackId, data, chatId, userId);
+    } else if (data.startsWith('confirm_counter_')) {
+        await handleConfirmCounterOfferCallback(bot, callbackId, data, chatId, userId);
+    } else if (data.startsWith('cancel_counter_')) {
+        await handleCancelCounterOfferCallback(bot, callbackId, data, chatId, userId);
     } else {
         // Answer callback to remove loading state
         await bot.answerCallbackQuery(callbackId);
@@ -378,3 +410,317 @@ export function cleanupExpiredBids(): void {
 
 // Run cleanup every 5 minutes
 setInterval(cleanupExpiredBids, 5 * 60 * 1000);
+
+/**
+ * Handle "Accept Counter Offer" button click
+ */
+async function handleAcceptCounterCallback(
+    bot: TelegramBot,
+    callbackId: string,
+    data: string,
+    chatId: number,
+    userId?: number
+): Promise<void> {
+    const userChatId = userId || chatId;
+
+    try {
+        // Find transporter by chat ID
+        const result = await findTransporterByChatId(userChatId);
+        if (!result) {
+            await bot.answerCallbackQuery(callbackId, {
+                text: '❌ You must be a registered transporter. Please use /start to verify your phone number.',
+                show_alert: true
+            });
+            return;
+        }
+
+        const { transporter, projectName } = result;
+
+        // Parse bid ID from callback data
+        // Callback data format: ac:<bidId>
+        const bidId = data.replace('ac:', '');
+
+        // Get the bid
+        const bid = await getBidById(bidId, projectName);
+        if (!bid) {
+            await bot.answerCallbackQuery(callbackId, {
+                text: '❌ Bid not found.',
+                show_alert: true
+            });
+            return;
+        }
+
+        // Verify this bid belongs to the transporter
+        if (bid.transporterId !== transporter.uid) {
+            await bot.answerCallbackQuery(callbackId, {
+                text: '❌ This bid does not belong to you.',
+                show_alert: true
+            });
+            return;
+        }
+
+        // Accept the counter offer
+        const updatedBid = await acceptCounterOffer(bidId, projectName);
+
+        if (updatedBid) {
+            await bot.answerCallbackQuery(callbackId);
+
+            // Get external URL for transport details
+            const externalUrl = getExternalTransportDetailsUrl(bid.id, transporter.uid);
+
+            // get load request to use display ID
+            const loadRequest = await getLoadRequestById(bid.loadRequestID, projectName);
+
+            await sendMessage(
+                userChatId,
+                `✅ Counter-offer accepted!\n\n` +
+                `📦 Load Request: #${loadRequest?.displayID || bid.loadRequestID}\n` +
+                `💰 Final Bid Amount: ETB ${updatedBid.pricing.amount.toLocaleString()}\n\n` +
+                `The cargo owner has been notified. You can now share transport details.`,
+                {
+                    inline_keyboard: [[
+                        {
+                            text: "📋 Share Transport Details",
+                            web_app: { url: externalUrl }
+                        }
+                    ]]
+                }
+            );
+            console.log(`✅ Transporter ${transporter.id} accepted counter offer for bid ${bidId}`);
+        } else {
+            await bot.answerCallbackQuery(callbackId, {
+                text: '❌ Failed to accept counter offer. Please try again.',
+                show_alert: true
+            });
+        }
+    } catch (error) {
+        console.error('Error accepting counter offer:', error);
+        await bot.answerCallbackQuery(callbackId, {
+            text: '❌ An error occurred. Please try again.',
+            show_alert: true
+        });
+    }
+}
+
+/**
+ * Handle "Counter Offer" button click - starts the counter offer flow
+ */
+async function handleCounterOfferCallback(
+    bot: TelegramBot,
+    callbackId: string,
+    data: string,
+    chatId: number,
+    userId?: number
+): Promise<void> {
+    const userChatId = userId || chatId;
+
+    try {
+        // Find transporter by chat ID
+        const result = await findTransporterByChatId(userChatId);
+        if (!result) {
+            await bot.answerCallbackQuery(callbackId, {
+                text: '❌ You must be a registered transporter. Please use /start to verify your phone number.',
+                show_alert: true
+            });
+            return;
+        }
+
+        const { transporter, projectName } = result;
+
+        // Parse bid ID from callback data
+        // Callback data format: co:<bidId>
+        const bidId = data.replace('co:', '');
+
+        // Get the bid
+        const bid = await getBidById(bidId, projectName);
+        if (!bid) {
+            await bot.answerCallbackQuery(callbackId, {
+                text: '❌ Bid not found.',
+                show_alert: true
+            });
+            return;
+        }
+
+        // Verify this bid belongs to the transporter
+        if (bid.transporterId !== transporter.id) {
+            await bot.answerCallbackQuery(callbackId, {
+                text: '❌ This bid does not belong to you.',
+                show_alert: true
+            });
+            return;
+        }
+
+        // Store counter offer state for this user
+        counterOfferStates.set(userChatId, {
+            bidId,
+            transporterId: transporter.id,
+            projectName,
+            loadRequestDisplayID: bid.loadRequestID,
+            counterAmount: 0,
+            originalBidAmount: bid.pricing.amount,
+            timestamp: Date.now()
+        });
+
+        // Answer callback to remove loading state
+        await bot.answerCallbackQuery(callbackId);
+
+        // Send message asking for counter offer amount
+        await sendMessage(
+            userChatId,
+            `💰 Enter your counter-offer amount:\n\n` +
+            `📦 Load Request: #${bid.loadRequestID}\n` +
+            `💰 Current Offer: ETB ${bid.pricing.amount.toLocaleString()}\n\n` +
+            `Please enter your counter-offer amount (ETB):`
+        );
+
+        // Set up counter offer state for message handler
+        setCounterOfferStateByChatId(userChatId, {
+            bidId,
+            transporterId: transporter.id,
+            projectName,
+            loadRequestDisplayID: bid.loadRequestID,
+            counterAmount: 0,
+            originalBidAmount: bid.pricing.amount,
+            timestamp: Date.now()
+        });
+
+        console.log(`✅ Started counter offer flow for bid ${bidId}`);
+    } catch (error) {
+        console.error('Error starting counter offer:', error);
+        await bot.answerCallbackQuery(callbackId, {
+            text: '❌ An error occurred. Please try again.',
+            show_alert: true
+        });
+    }
+}
+
+/**
+ * Handle "Confirm Counter Offer" button click
+ */
+async function handleConfirmCounterOfferCallback(
+    bot: TelegramBot,
+    callbackId: string,
+    _data: string,
+    chatId: number,
+    userId?: number
+): Promise<void> {
+    const userChatId = userId || chatId;
+
+    try {
+        // Find transporter by chat ID
+        const result = await findTransporterByChatId(userChatId);
+        if (!result) {
+            await bot.answerCallbackQuery(callbackId, {
+                text: '❌ You must be a registered transporter.',
+                show_alert: true
+            });
+            return;
+        }
+
+        const { transporter, projectName } = result;
+
+        // Get counter offer state
+        const state = getCounterOfferStateByChatId(userChatId);
+        if (!state) {
+            await bot.answerCallbackQuery(callbackId, {
+                text: '❌ Counter offer session expired. Please start over.',
+                show_alert: true
+            });
+            return;
+        }
+
+        // Submit the counter offer
+        const updatedBid = await transporterCounterOffer(
+            state.bidId,
+            state.counterAmount,
+            `${transporter.firstName} ${transporter.lastName || ''}`.trim(),
+            projectName
+        );
+
+        if (updatedBid) {
+            await bot.answerCallbackQuery(callbackId);
+            await sendMessage(
+                userChatId,
+                `✅ Your counter-offer of ETB ${state.counterAmount.toLocaleString()} has been sent to the cargo owner.\n\n` +
+                `📦 Load Request: #${state.loadRequestDisplayID}\n` +
+                `💰 Your Counter-Offer: ETB ${state.counterAmount.toLocaleString()}`
+            );
+
+            // Clear counter offer state
+            clearCounterOfferStateByChatId(userChatId);
+            counterOfferStates.delete(userChatId);
+
+            console.log(`✅ Transporter ${transporter.id} submitted counter offer for bid ${state.bidId}`);
+        } else {
+            await bot.answerCallbackQuery(callbackId, {
+                text: '❌ Failed to submit counter offer. Please try again.',
+                show_alert: true
+            });
+        }
+    } catch (error) {
+        console.error('Error confirming counter offer:', error);
+        await bot.answerCallbackQuery(callbackId, {
+            text: '❌ An error occurred. Please try again.',
+            show_alert: true
+        });
+    }
+}
+
+/**
+ * Handle "Cancel Counter Offer" button click
+ */
+async function handleCancelCounterOfferCallback(
+    bot: TelegramBot,
+    callbackId: string,
+    _data: string,
+    chatId: number,
+    userId?: number
+): Promise<void> {
+    const userChatId = userId || chatId;
+
+    // Clear counter offer state
+    clearCounterOfferStateByChatId(userChatId);
+    counterOfferStates.delete(userChatId);
+
+    await bot.answerCallbackQuery(callbackId);
+    await sendMessage(userChatId, '❌ Counter offer cancelled.');
+}
+
+/**
+ * Get counter offer state for a chat
+ */
+export function getCounterOfferStateByChatId(chatId: number): CounterOfferState | undefined {
+    return counterOfferStates.get(chatId);
+}
+
+/**
+ * Set counter offer state for a chat
+ */
+export function setCounterOfferStateByChatId(chatId: number, state: CounterOfferState): void {
+    counterOfferStates.set(chatId, state);
+}
+
+/**
+ * Clear counter offer state for a chat
+ */
+export function clearCounterOfferStateByChatId(chatId: number): void {
+    counterOfferStates.delete(chatId);
+}
+
+/**
+ * Clean up expired counter offer states (older than 10 minutes)
+ */
+export function cleanupExpiredCounterOfferStates(): void {
+    const now = Date.now();
+    const EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
+
+    for (const [chatId, state] of counterOfferStates.entries()) {
+        if (now - state.timestamp > EXPIRY_MS) {
+            counterOfferStates.delete(chatId);
+            console.log(`Cleaned up expired counter offer state for chat ${chatId}`);
+        }
+    }
+}
+
+// Run cleanup every 5 minutes
+setInterval(cleanupExpiredCounterOfferStates, 5 * 60 * 1000);

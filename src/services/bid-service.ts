@@ -1,5 +1,5 @@
 import { getHealthyDbInstances, retryDatabaseOperation } from '../firebase-config';
-import { Bid, BidStatus } from '../models/bid';
+import { Bid, BidStatus, OfferHistory } from '../models/bid';
 import { LoadRequest, LowestBidInfo } from '../models/load-request';
 import admin from 'firebase-admin';
 
@@ -523,4 +523,129 @@ ${lowestBidDisplay}
     `.trim();
 
     return message;
+}
+
+/**
+ * Accept a counter offer - updates bid status to Accepted
+ */
+export async function acceptCounterOffer(
+    bidId: string,
+    projectName: string
+): Promise<Bid | null> {
+    const db = (await getHealthyDbInstances())[projectName];
+    if (!db) {
+        throw new Error(`Database for project ${projectName} is not available`);
+    }
+
+    const docRef = db.collection('bids').doc(bidId);
+    const doc = await retryDatabaseOperation(async () => {
+        return await docRef.get();
+    }, 2, 1000, projectName);
+
+    if (!doc.exists) {
+        console.log(`Bid ${bidId} not found`);
+        return null;
+    }
+
+    // Update bid status to Accepted
+    await retryDatabaseOperation(async () => {
+        await docRef.update({
+            status: BidStatus.ACCEPTED,
+            isAccepted: true,
+            isWinner: true,
+            updatedAt: admin.firestore.Timestamp.now()
+        });
+    }, 2, 1000, projectName);
+
+    console.log(`✅ Counter offer accepted for bid ${bidId}`);
+
+    // Return updated bid
+    const updatedDoc = await retryDatabaseOperation(async () => {
+        return await docRef.get();
+    }, 2, 1000, projectName);
+
+    return { id: updatedDoc.id, ...updatedDoc.data() } as Bid;
+}
+
+/**
+ * Transporter counters a counter offer - adds a new counter offer to the history
+ */
+export async function transporterCounterOffer(
+    bidId: string,
+    amount: number,
+    transporterName: string,
+    projectName: string
+): Promise<Bid | null> {
+    const db = (await getHealthyDbInstances())[projectName];
+    if (!db) {
+        throw new Error(`Database for project ${projectName} is not available`);
+    }
+
+    const docRef = db.collection('bids').doc(bidId);
+    const doc = await retryDatabaseOperation(async () => {
+        return await docRef.get();
+    }, 2, 1000, projectName);
+
+    if (!doc.exists) {
+        console.log(`Bid ${bidId} not found`);
+        return null;
+    }
+
+    const existingBid = { id: doc.id, ...doc.data() } as Bid;
+
+    const now = new Date().toISOString();
+
+    // Add transporter counter offer to history
+    const counterOffer: OfferHistory = {
+        id: crypto.randomUUID(),
+        amount,
+        currency: existingBid.pricing.currency,
+        type: 'transporter_counter',
+        offeredBy: 'transporter',
+        offeredByName: transporterName,
+        timestamp: now
+    };
+
+    const updatedHistory = [...(existingBid.offerHistory || []), counterOffer];
+
+    await retryDatabaseOperation(async () => {
+        await docRef.update({
+            status: BidStatus.COUNTER_OFFER as BidStatus,
+            'pricing.amount': amount,
+            offerHistory: updatedHistory,
+            updatedAt: admin.firestore.Timestamp.now()
+        });
+    }, 2, 1000, projectName);
+
+    console.log(`✅ Transporter counter offer added for bid ${bidId}: ETB ${amount.toLocaleString()}`);
+
+    // Return updated bid
+    const updatedDoc = await retryDatabaseOperation(async () => {
+        return await docRef.get();
+    }, 2, 1000, projectName);
+
+    return { id: updatedDoc.id, ...updatedDoc.data() } as Bid;
+}
+
+/**
+ * Get a bid by ID
+ */
+export async function getBidById(
+    bidId: string,
+    projectName: string
+): Promise<Bid | null> {
+    const db = (await getHealthyDbInstances())[projectName];
+    if (!db) {
+        throw new Error(`Database for project ${projectName} is not available`);
+    }
+
+    const doc = await retryDatabaseOperation(async () => {
+        return await db.collection('bids').doc(bidId).get();
+    }, 2, 1000, projectName);
+
+    if (!doc.exists) {
+        return null;
+    }
+
+    return { id: doc.id, ...doc.data() } as Bid;
 }
