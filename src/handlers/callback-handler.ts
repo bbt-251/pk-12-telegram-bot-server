@@ -313,27 +313,25 @@ async function displayUserBids(chatId: number): Promise<void> {
         return;
     }
 
-    // Format the bids message (using HTML for compatibility with sendMessage)
-    let message = `📋 <b>Your Bids</b>\n\n`;
+    // Format status with emoji
+    const statusEmoji: Record<string, string> = {
+        'Pending': '⏳',
+        'Accepted': '✅',
+        'Rejected': '❌',
+        'Counter Offer': '💰',
+        'Withdrawn': '🚫',
+        'Expired': '⏰'
+    };
 
+    // Send individual message for each bid
     for (const bid of bids) {
         // Get load request info
         const loadRequest = await getLoadRequestById(bid.loadRequestID, projectName);
         const displayID = loadRequest?.displayID || bid.loadRequestID;
 
-        // Format status with emoji
-        const statusEmoji: Record<string, string> = {
-            'Pending': '⏳',
-            'Accepted': '✅',
-            'Rejected': '❌',
-            'Counter Offer': '💰',
-            'Withdrawn': '🚫',
-            'Expired': '⏰'
-        };
-
         const emoji = statusEmoji[bid.status] || '📌';
 
-        message += `${emoji} <b>${displayID}</b>\n`;
+        let message = `${emoji} <b>${displayID}</b>\n`;
         message += `💰 Bid: ETB ${bid.pricing.amount.toLocaleString()}\n`;
         message += `🚛 Trucks: ${bid.trucksProvided}\n`;
         message += `📊 Status: ${bid.status}\n`;
@@ -343,12 +341,27 @@ async function displayUserBids(chatId: number): Promise<void> {
             message += `📍 ${loadRequest.route.origin} → ${loadRequest.route.destination}\n`;
         }
 
-        message += `\n`;
+        // Add Share Transport Details button if bid is Accepted and load request is not Confirmed
+        if (bid.status === 'Accepted' && loadRequest?.status !== 'Confirmed') {
+            const externalUrl = getExternalTransportDetailsUrl(bid.id, transporter.uid);
+            await sendMessage(
+                chatId,
+                message,
+                {
+                    inline_keyboard: [[
+                        {
+                            text: "📋 Share Transport Details",
+                            web_app: { url: externalUrl }
+                        }
+                    ]]
+                }
+            );
+        } else {
+            await sendMessage(chatId, message);
+        }
     }
 
-    message += `Total Bids: ${bids.length}`;
-
-    await sendMessage(chatId, message);
+    await sendMessage(chatId, `Total Bids: ${bids.length}`);
 }
 
 /**
@@ -465,27 +478,36 @@ async function handleAcceptCounterCallback(
         if (updatedBid) {
             await bot.answerCallbackQuery(callbackId);
 
-            // Get external URL for transport details
-            const externalUrl = getExternalTransportDetailsUrl(bid.id, transporter.uid);
-
-            // get load request to use display ID
+            // Get load request to use display ID and check status
             const loadRequest = await getLoadRequestById(bid.loadRequestID, projectName);
 
-            await sendMessage(
-                userChatId,
-                `✅ Counter-offer accepted!\n\n` +
-                `📦 Load Request: #${loadRequest?.displayID || bid.loadRequestID}\n` +
-                `💰 Final Bid Amount: ETB ${updatedBid.pricing.amount.toLocaleString()}\n\n` +
-                `The cargo owner has been notified. You can now share transport details.`,
-                {
-                    inline_keyboard: [[
-                        {
-                            text: "📋 Share Transport Details",
-                            web_app: { url: externalUrl }
-                        }
-                    ]]
-                }
-            );
+            // Only show Share Transport Details button if load request is not Confirmed
+            if (loadRequest?.status !== 'Confirmed') {
+                const externalUrl = getExternalTransportDetailsUrl(bid.id, transporter.uid);
+                await sendMessage(
+                    userChatId,
+                    `✅ Counter-offer accepted!\n\n` +
+                    `📦 Load Request: #${loadRequest?.displayID || bid.loadRequestID}\n` +
+                    `💰 Final Bid Amount: ETB ${updatedBid.pricing.amount.toLocaleString()}\n\n` +
+                    `The cargo owner has been notified. You can now share transport details.`,
+                    {
+                        inline_keyboard: [[
+                            {
+                                text: "📋 Share Transport Details",
+                                web_app: { url: externalUrl }
+                            }
+                        ]]
+                    }
+                );
+            } else {
+                await sendMessage(
+                    userChatId,
+                    `✅ Counter-offer accepted!\n\n` +
+                    `📦 Load Request: #${loadRequest?.displayID || bid.loadRequestID}\n` +
+                    `💰 Final Bid Amount: ETB ${updatedBid.pricing.amount.toLocaleString()}\n\n` +
+                    `The cargo owner has been notified.`
+                );
+            }
             console.log(`✅ Transporter ${transporter.id} accepted counter offer for bid ${bidId}`);
         } else {
             await bot.answerCallbackQuery(callbackId, {
