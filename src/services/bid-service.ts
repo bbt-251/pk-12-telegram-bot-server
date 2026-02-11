@@ -19,13 +19,21 @@ export async function createBid(
         throw new Error(`Database for project ${projectName} is not available`);
     }
 
+    // Strip Firebase project ID prefix from load request ID if present
+    const { firebaseConfigs } = await import('../firebase-config');
+    const firebaseProjectId = firebaseConfigs[projectName]?.projectId;
+    let actualLoadRequestId = loadRequestId;
+    if (firebaseProjectId && loadRequestId.startsWith(`${firebaseProjectId}_`)) {
+        actualLoadRequestId = loadRequestId.replace(`${firebaseProjectId}_`, '');
+    }
+
     const now = new Date().toISOString();
     const bidRef = db.collection('bids').doc();
     const bidId = bidRef.id;
 
     const bid: Bid = {
         id: bidId,
-        loadRequestID: loadRequestId,
+        loadRequestID: actualLoadRequestId,
         transporterId,
         transporterName,
         pricing: {
@@ -55,7 +63,7 @@ export async function createBid(
         await bidRef.set(bid);
     }, 2, 1000, projectName);
 
-    console.log(`✅ Created bid ${bidId} for load ${loadRequestId} by transporter ${transporterId}`);
+    console.log(`✅ Created bid ${bidId} for load ${actualLoadRequestId} by transporter ${transporterId}`);
     return bid;
 }
 
@@ -73,9 +81,17 @@ export async function hasExistingBid(
         throw new Error(`Database for project ${projectName} is not available`);
     }
 
+    // Strip Firebase project ID prefix if present
+    const { firebaseConfigs } = await import('../firebase-config');
+    const firebaseProjectId = firebaseConfigs[projectName]?.projectId;
+    let actualLoadRequestId = loadRequestId;
+    if (firebaseProjectId && loadRequestId.startsWith(`${firebaseProjectId}_`)) {
+        actualLoadRequestId = loadRequestId.replace(`${firebaseProjectId}_`, '');
+    }
+
     const query = await retryDatabaseOperation(async () => {
         return await db.collection('bids')
-            .where('loadRequestId', '==', loadRequestId)
+            .where('loadRequestID', '==', actualLoadRequestId)
             .where('transporterId', '==', transporterId)
             .limit(1)
             .get();
@@ -98,9 +114,17 @@ export async function getExistingBid(
         throw new Error(`Database for project ${projectName} is not available`);
     }
 
+    // Strip Firebase project ID prefix if present
+    const { firebaseConfigs } = await import('../firebase-config');
+    const firebaseProjectId = firebaseConfigs[projectName]?.projectId;
+    let actualLoadRequestId = loadRequestId;
+    if (firebaseProjectId && loadRequestId.startsWith(`${firebaseProjectId}_`)) {
+        actualLoadRequestId = loadRequestId.replace(`${firebaseProjectId}_`, '');
+    }
+
     const query = await retryDatabaseOperation(async () => {
         return await db.collection('bids')
-            .where('loadRequestID', '==', loadRequestId)
+            .where('loadRequestID', '==', actualLoadRequestId)
             .where('transporterId', '==', transporterId)
             .limit(1)
             .get();
@@ -181,20 +205,41 @@ export async function getLoadRequestById(
     loadRequestId: string,
     projectName: string
 ): Promise<LoadRequest | null> {
-    const db = (await getHealthyDbInstances())[projectName];
+    const healthyDbs = await getHealthyDbInstances();
+    const db = healthyDbs[projectName];
     if (!db) {
-        throw new Error(`Database for project ${projectName} is not available`);
+        console.log(`Database for project ${projectName} is not available`);
+        return null;
     }
 
+    // Get the Firebase project ID for this project
+    const { firebaseConfigs } = await import('../firebase-config');
+    const firebaseProjectId = firebaseConfigs[projectName]?.projectId;
+
+    // Strip Firebase project ID prefix if present (e.g., pk-12-development_xxx)
+    let docId = loadRequestId;
+    if (firebaseProjectId && loadRequestId.startsWith(`${firebaseProjectId}_`)) {
+        docId = loadRequestId.replace(`${firebaseProjectId}_`, '');
+    }
+
+    // Fetch the document
     const doc = await retryDatabaseOperation(async () => {
-        return await db.collection('loadRequests').doc(loadRequestId).get();
+        return await db.collection('loadRequests').doc(docId).get();
     }, 2, 1000, projectName);
 
     if (!doc.exists) {
         return null;
     }
 
-    return { id: doc.id, ...doc.data() } as LoadRequest;
+    const loadRequest = { id: doc.id, ...doc.data() } as LoadRequest;
+
+    // If load request has a projectId field, validate it matches the expected project
+    if (loadRequest.projectId && loadRequest.projectId !== projectName) {
+        console.log(`Warning: Load request ${loadRequestId} has projectId=${loadRequest.projectId} but was queried from ${projectName}`);
+        return null;
+    }
+
+    return loadRequest;
 }
 
 /**
@@ -231,9 +276,17 @@ export async function getBidsForLoadRequest(
         throw new Error(`Database for project ${projectName} is not available`);
     }
 
+    // Strip Firebase project ID prefix if present
+    const { firebaseConfigs } = await import('../firebase-config');
+    const firebaseProjectId = firebaseConfigs[projectName]?.projectId;
+    let actualLoadRequestId = loadRequestId;
+    if (firebaseProjectId && loadRequestId.startsWith(`${firebaseProjectId}_`)) {
+        actualLoadRequestId = loadRequestId.replace(`${firebaseProjectId}_`, '');
+    }
+
     const query = await retryDatabaseOperation(async () => {
         return await db.collection('bids')
-            .where('loadRequestID', '==', loadRequestId)
+            .where('loadRequestID', '==', actualLoadRequestId)
             .get();
     }, 2, 1000, projectName);
 
@@ -326,14 +379,17 @@ export async function updateLowestBidAndTelegram(
             updatedAt: now
         };
 
+        // Use the actual document ID from the fetched load request (may be different from input if prefix was stripped)
+        const actualLoadRequestId = loadRequest.id;
+
         await retryDatabaseOperation(async () => {
-            await db.collection('loadRequests').doc(loadRequestId).update({
+            await db.collection('loadRequests').doc(actualLoadRequestId).update({
                 lowestBid: lowestBidData,
                 updatedAt: now
             });
         }, 2, 1000, projectName);
 
-        console.log(`✅ Updated lowest bid for load request ${loadRequestId}: ETB ${newBidAmount.toLocaleString()}`);
+        console.log(`✅ Updated lowest bid for load request ${actualLoadRequestId}: ETB ${newBidAmount.toLocaleString()}`);
 
         // Update Telegram message if it exists
         if (loadRequest.telegramMessageId) {
@@ -383,11 +439,12 @@ async function editTelegramMessage(
     const messageText = await formatLoadRequestMessageWithLowestBid(loadRequest, lowestBid);
 
     // Build inline keyboard with "Place Bid" button using deep link
+    // Include project name in deep link: bid_<projectName>_<loadRequestId>
     const replyMarkup = botUsername ? {
         inline_keyboard: [[
             {
                 text: "💰 Place Bid",
-                url: `https://t.me/${botUsername}?start=bid_${loadRequestId}`
+                url: `https://t.me/${botUsername}?start=bid_${projectName}_${loadRequestId}`
             }
         ]]
     } : undefined;

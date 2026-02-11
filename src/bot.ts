@@ -76,10 +76,34 @@ bot.onText(/\/start (.*)/, async (msg: TelegramMessage, match: RegExpExecArray |
     console.log(`🔔 RECEIVED /start command from chat ${chatId} with payload: ${payload}`);
 
     // Check if this is a deep link for placing a bid
+    // Format: bid_<projectId>_<loadRequestId> or bid_<loadRequestId> (backward compatibility)
     if (payload.startsWith('bid_')) {
-        const loadRequestId = payload.replace('bid_', '');
-        console.log(`📦 Deep link detected for load request: ${loadRequestId}`);
-        await handleBidDeepLink(chatId, loadRequestId);
+        const value = payload.replace('bid_', '');
+        const parts = value.split('_');
+
+        let projectName: string | undefined;
+        let loadRequestId: string;
+
+        // Check if projectId is included (new format: bid_<projectId>_<loadRequestId>)
+        // Project names from firebase-config: 'development', 'int'
+        // We also support short names: 'dev' -> 'development', 'i' -> 'int'
+        const validProjects = ['development', 'int', 'dev', 'i'];
+        if (parts.length >= 2 && parts[0] && validProjects.includes(parts[0])) {
+            // Map short names to full names
+            const projectNameMap: Record<string, string> = {
+                'dev': 'development',
+                'i': 'int'
+            };
+            projectName = projectNameMap[parts[0]] || parts[0];
+            loadRequestId = parts.slice(1).join('_');
+            console.log(`📦 Deep link detected for project: ${projectName}, load request: ${loadRequestId}`);
+        } else {
+            // Backward compatibility: bid_<loadRequestId>
+            loadRequestId = value;
+            console.log(`📦 Deep link detected for load request: ${loadRequestId}`);
+        }
+
+        await handleBidDeepLink(chatId, loadRequestId, projectName);
     } else {
         // Regular /start - request phone verification for transporters/brokers
         sendContactRequest(chatId);
@@ -95,8 +119,11 @@ bot.onText(/^\/start$/, (msg: TelegramMessage) => {
 
 /**
  * Handle deep link for placing a bid
+ * @param chatId - The user's chat ID
+ * @param loadRequestId - The load request ID
+ * @param projectNameOverride - Optional project name from deep link (if provided, uses this instead of transporter's project)
  */
-async function handleBidDeepLink(chatId: number, loadRequestId: string): Promise<void> {
+async function handleBidDeepLink(chatId: number, loadRequestId: string, projectNameOverride?: string): Promise<void> {
     try {
         // Find transporter by chat ID
         const result = await findTransporterByChatId(chatId);
@@ -106,20 +133,39 @@ async function handleBidDeepLink(chatId: number, loadRequestId: string): Promise
             return;
         }
 
-        const { transporter, projectName } = result;
+        const { transporter, projectName: transporterProject } = result;
 
-        // Check if transporter is active
-        // if (transporter.status !== 'Active') {
-        //     await sendMessage(chatId, '❌ Your account is not active. Please contact support.');
-        //     return;
-        // }
+        // Use project from deep link if provided, otherwise use transporter's project
+        const projectName = projectNameOverride || transporterProject;
+
+        console.log(`Handling bid deep link: transporter project=${transporterProject}, load request project=${projectName}`);
+        console.log(`Looking for load request ${loadRequestId} in project ${projectName}`);
+
+        // Check if transporter and load request are in the same project
+        if (projectNameOverride && projectNameOverride !== transporterProject) {
+            await sendMessage(chatId, '❌ This load request is from a different project. Please use the correct bot for this load request.');
+            return;
+        }
 
         // Check if load request exists and is open
         const loadRequest = await getLoadRequestById(loadRequestId, projectName);
 
         if (!loadRequest) {
-            console.log(`checking for load request ${loadRequestId} on project ${projectName} and res: `, loadRequest)
-            await sendMessage(chatId, '❌ This load request no longer exists.');
+            console.log(`Load request ${loadRequestId} not found in project ${projectName}`)
+            await sendMessage(chatId, `❌ This load request no longer exists.
+
+---
+Debug:
+Load Request Data ID: ${loadRequestId}
+DB: ${projectName}
+---`);
+            return;
+        }
+
+        // If load request has a projectId field, validate it matches
+        if (loadRequest.projectId && loadRequest.projectId !== projectName) {
+            console.log(`Project mismatch: load request project=${loadRequest.projectId}, expected=${projectName}`)
+            await sendMessage(chatId, `❌ This load request is from a different project.\n\nYour account: ${projectName}\nLoad request: ${loadRequest.projectId}\n\nPlease use the correct bot for this load request.`);
             return;
         }
 

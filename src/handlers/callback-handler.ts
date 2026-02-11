@@ -9,7 +9,7 @@ import {
     transporterCounterOffer
 } from '../services/bid-service';
 import { sendMessage } from '../bot';
-import { confirmBid, restartBidFlow } from './message-handler';
+import { confirmBid } from './message-handler';
 import { formatDate } from '../dayjs_util';
 import { getExternalTransportDetailsUrl } from '../firebase-config';
 
@@ -64,7 +64,7 @@ export async function handleCallbackQuery(
     } else if (data.startsWith('confirm_bid_')) {
         await handleConfirmBidCallback(bot, callbackId, chatId, userId);
     } else if (data.startsWith('edit_bid_')) {
-        await handleEditBidCallback(bot, callbackId, chatId, userId);
+        await handleEditBidCallback(bot, callbackId, data, chatId, userId);
     } else if (data === 'view_my_bids') {
         await handleViewMyBidsCallback(bot, callbackId, chatId, userId);
     } else if (data.startsWith('ac:')) {
@@ -129,7 +129,23 @@ async function handlePlaceBidCallback(
 
         if (!loadRequest) {
             await bot.answerCallbackQuery(callbackId, {
-                text: '❌ This load request no longer exists.',
+                text: `❌ This load request no longer exists.
+
+---
+Debug:
+Load Request Data ID: ${loadRequestId}
+DB: ${projectName}
+---`,
+                show_alert: true
+            });
+            return;
+        }
+
+        // If load request has a projectId field, validate it matches
+        if (loadRequest.projectId && loadRequest.projectId !== projectName) {
+            console.log(`Project mismatch: load request project=${loadRequest.projectId}, expected=${projectName}`)
+            await bot.answerCallbackQuery(callbackId, {
+                text: `❌ This load request is from a different project.\n\nYour account: ${projectName}\nLoad request: ${loadRequest.projectId}`,
                 show_alert: true
             });
             return;
@@ -251,17 +267,114 @@ async function handleConfirmBidCallback(
 async function handleEditBidCallback(
     bot: TelegramBot,
     callbackId: string,
+    data: string,
     chatId: number,
     userId?: number
 ): Promise<void> {
     // Use userId (user's private chat ID)
     const userChatId = userId || chatId;
 
-    // Answer callback to remove loading state
-    await bot.answerCallbackQuery(callbackId);
+    // Parse bid ID from callback data
+    const bidId = data.replace('edit_bid_', '');
 
-    // Restart the bid flow
-    await restartBidFlow(userChatId);
+    try {
+        // Find transporter
+        const result = await findTransporterByChatId(userChatId);
+        if (!result) {
+            await bot.answerCallbackQuery(callbackId, {
+                text: '❌ You must be a registered transporter to edit bids.',
+                show_alert: true
+            });
+            return;
+        }
+
+        const { transporter, projectName } = result;
+
+        // Get the bid
+        const bid = await getBidById(bidId, projectName);
+        if (!bid) {
+            await bot.answerCallbackQuery(callbackId, {
+                text: '❌ Bid not found.',
+                show_alert: true
+            });
+            return;
+        }
+
+        // Verify this bid belongs to the transporter
+        if (bid.transporterId !== transporter.uid) {
+            await bot.answerCallbackQuery(callbackId, {
+                text: '❌ This bid does not belong to you.',
+                show_alert: true
+            });
+            return;
+        }
+
+        // Get the load request
+        const loadRequest = await getLoadRequestById(bid.loadRequestID, projectName);
+        if (!loadRequest) {
+            await bot.answerCallbackQuery(callbackId, {
+                text: '❌ Load request not found.',
+                show_alert: true
+            });
+            return;
+        }
+
+        // Check if bid can be edited (must be Pending)
+        if (bid.status !== 'Pending') {
+            await bot.answerCallbackQuery(callbackId, {
+                text: '❌ This bid can no longer be edited.',
+                show_alert: true
+            });
+            return;
+        }
+
+        // Set up pending bid with existing bid ID for editing
+        setPendingBidWithExistingId(userChatId, {
+            loadRequestId: bid.loadRequestID,
+            displayID: loadRequest.displayID,
+            transporterId: transporter.id,
+            transporterName: transporter.firstName,
+            transporterPhone: transporter.phone,
+            projectName,
+            timestamp: Date.now()
+        }, bidId);
+
+        // Answer callback to remove loading state
+        await bot.answerCallbackQuery(callbackId);
+
+        // Send load info
+        const loadInfo = `
+📦 Load Request #${loadRequest.displayID}
+
+📍 From: ${loadRequest.route.origin}
+📍 To: ${loadRequest.route.destination}
+🚚 Cargo: ${loadRequest.cargo.cargoType}
+⚖️ Weight: ${loadRequest.cargoTotals.totalWeight}
+📅 Pickup: ${loadRequest.schedule.pickupDate}
+📅 Delivery: ${loadRequest.schedule.deliveryDate}
+        `.trim();
+
+        await sendMessage(userChatId, loadInfo);
+
+        // Send edit form with pre-filled current bid amount
+        await sendMessage(
+            userChatId,
+            `📝 Edit your bid\n\nCurrent bid: ETB ${bid.pricing.amount.toLocaleString()}\n\nPlease enter your new bid amount (ETB):`,
+            {
+                inline_keyboard: [
+                    [{ text: '❌ Cancel', callback_data: `cancel_bid_${bid.loadRequestID}` }]
+                ]
+            }
+        );
+
+        console.log(`✅ Started edit flow for bid ${bidId} on load ${bid.loadRequestID}`);
+    } catch (error) {
+        console.error('Error handling edit bid callback:', error);
+        await bot.answerCallbackQuery(callbackId, {
+            text: '❌ An error occurred. Please try again.',
+            show_alert: true
+        });
+    }
 }
 
 /**
@@ -341,8 +454,20 @@ async function displayUserBids(chatId: number): Promise<void> {
             message += `📍 ${loadRequest.route.origin} → ${loadRequest.route.destination}\n`;
         }
 
-        // Add Share Transport Details button if bid is Accepted and load request is not Confirmed
-        if (bid.status === 'Accepted' && loadRequest?.status !== 'Confirmed') {
+        // Add buttons based on bid status
+        if (bid.status === 'Pending') {
+            // Show Edit button for pending bids
+            await sendMessage(
+                chatId,
+                message,
+                {
+                    inline_keyboard: [[
+                        { text: "✏️ Edit", callback_data: `edit_bid_${bid.id}` }
+                    ]]
+                }
+            );
+        } else if (bid.status === 'Accepted' && loadRequest?.status !== 'Confirmed') {
+            // Show Share Transport Details button for accepted bids
             const externalUrl = getExternalTransportDetailsUrl(bid.id, transporter.uid);
             await sendMessage(
                 chatId,
@@ -667,7 +792,7 @@ async function handleConfirmCounterOfferCallback(
             clearCounterOfferStateByChatId(userChatId);
             counterOfferStates.delete(userChatId);
 
-            console.log(`✅ Transporter ${transporter.id} submitted counter offer for bid ${state.bidId}`);
+            console.log(`✅ Transporter ${transporter.firstName} ${transporter.lastName} (${transporter.uid}) submitted counter offer for bid ${state.bidId}`);
         } else {
             await bot.answerCallbackQuery(callbackId, {
                 text: '❌ Failed to submit counter offer. Please try again.',

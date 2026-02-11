@@ -187,6 +187,7 @@ export interface LoadRequest {
     id: string;
     displayID: string;
     userId: string;
+    projectId?: string; // Optional field to identify which Firebase project this belongs to
     status: LoadRequestStatus;
     route: LoadRequestRoute;
     schedule: LoadRequestSchedule;
