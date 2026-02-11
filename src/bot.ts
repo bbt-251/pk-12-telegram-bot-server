@@ -102,7 +102,7 @@ async function handleBidDeepLink(chatId: number, loadRequestId: string): Promise
         const result = await findTransporterByChatId(chatId);
 
         if (!result) {
-            await sendMessage(chatId, '❌ You must be a registered transporter to place bids. Please use /start to verify your phone number.');
+            await sendMessage(chatId, '❌ You must be a registered transporter or broker to place bids. Please use /start to verify your phone number.');
             return;
         }
 
@@ -118,6 +118,7 @@ async function handleBidDeepLink(chatId: number, loadRequestId: string): Promise
         const loadRequest = await getLoadRequestById(loadRequestId, projectName);
 
         if (!loadRequest) {
+            console.log(`checking for load request ${loadRequestId} on project ${projectName} and res: `, loadRequest)
             await sendMessage(chatId, '❌ This load request no longer exists.');
             return;
         }
@@ -128,7 +129,7 @@ async function handleBidDeepLink(chatId: number, loadRequestId: string): Promise
         }
 
         // Check if already bid and if it can be edited
-        const existingBidResult = await getExistingBid(loadRequestId, transporter.id, projectName);
+        const existingBidResult = await getExistingBid(loadRequestId, transporter.uid, projectName);
 
         if (existingBidResult) {
             const { bid, canEdit } = existingBidResult;
@@ -140,7 +141,7 @@ async function handleBidDeepLink(chatId: number, loadRequestId: string): Promise
                     `📝 You already have a bid on this load request.\n\n` +
                     `Current bid: ETB ${bid.pricing.amount.toLocaleString()}\n` +
                     `Trucks: ${bid.trucksProvided}\n\n` +
-                    `You can edit your bid by entering new values below:`,
+                    `Please enter your new bid amount (ETB):`,
                     {
                         inline_keyboard: [
                             [{ text: '❌ Cancel', callback_data: `cancel_bid_${loadRequestId}` }]

@@ -100,7 +100,7 @@ export async function getExistingBid(
 
     const query = await retryDatabaseOperation(async () => {
         return await db.collection('bids')
-            .where('loadRequestId', '==', loadRequestId)
+            .where('loadRequestID', '==', loadRequestId)
             .where('transporterId', '==', transporterId)
             .limit(1)
             .get();

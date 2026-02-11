@@ -63,6 +63,7 @@ async function handleBidFlow(
         transporterName: string;
         transporterPhone: string;
         projectName: string;
+        existingBidId?: string | undefined;
     }
 ): Promise<void> {
     const state = bidStates.get(chatId);
@@ -107,7 +108,7 @@ async function handleBidFlow(
             transporterPhone: pendingBid.transporterPhone,
             projectName: pendingBid.projectName,
             bidAmount: amount,
-            existingBidId: state?.existingBidId || undefined // Preserve existing bid ID if editing
+            existingBidId: state?.existingBidId || pendingBid.existingBidId // Preserve existing bid ID if editing
         });
 
         const actionText = state?.existingBidId ? 'Updated bid amount' : 'Bid amount';
