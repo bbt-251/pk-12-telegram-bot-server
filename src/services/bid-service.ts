@@ -1,4 +1,4 @@
-import { getHealthyDbInstances, retryDatabaseOperation } from '../firebase-config';
+import { getHealthyDbInstances, retryDatabaseOperation, getExternalBidUrl } from '../firebase-config';
 import { Bid, BidStatus, OfferHistory } from '../models/bid';
 import { LoadRequest, LowestBidInfo } from '../models/load-request';
 import admin from 'firebase-admin';
@@ -424,7 +424,6 @@ async function editTelegramMessage(
 
     // Get the chat ID from environment variables
     const channelId = process.env.TELEGRAM_CHANNEL_ID;
-    const botUsername = process.env.TELEGRAM_BOT_USERNAME;
     if (!channelId) {
         console.error('TELEGRAM_CHANNEL_ID environment variable not set');
         return;
@@ -438,16 +437,16 @@ async function editTelegramMessage(
     // Format the new message with lowest bid (using main platform format)
     const messageText = await formatLoadRequestMessageWithLowestBid(loadRequest, lowestBid);
 
-    // Build inline keyboard with "Place Bid" button using deep link
-    // Include project name in deep link: bid_<projectName>_<loadRequestId>
-    const replyMarkup = botUsername ? {
+    // Build inline keyboard with "Place Bid" button using Telegram Mini App web_app
+    // Use 'public' as transporterId for unauthenticated access (auth handled via token)
+    const replyMarkup = {
         inline_keyboard: [[
             {
                 text: "💰 Place Bid",
-                url: `https://t.me/${botUsername}?start=bid_${projectName}_${loadRequestId}`
+                web_app: { url: getExternalBidUrl(loadRequest.id, 'public') }
             }
         ]]
-    } : undefined;
+    };
 
     // Import bot from bot.ts (using dynamic import to avoid circular dependency)
     const { bot } = await import('../bot');
@@ -575,9 +574,7 @@ ${containerInfoLines.length > 0 ? `📦 *Container Info:*\n${containerInfoLines.
 ${lowestBidDisplay}
 📊 *Status:* ${status}
 🕒 *Posted:* ${formatDate(createdAt)}
-
-👇 *Click the button below to place your bid!*
-    `.trim();
+   `.trim();
 
     return message;
 }

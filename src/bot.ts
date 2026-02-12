@@ -1,9 +1,10 @@
 // Telegram Bot for Cargo Bidding System
 import TelegramBot from 'node-telegram-bot-api';
-import { handleCallbackQuery, setPendingBid, setPendingBidWithExistingId, getCounterOfferStateByChatId } from './handlers/callback-handler';
+import { handleCallbackQuery, setPendingBidWithExistingId, getCounterOfferStateByChatId } from './handlers/callback-handler';
 import { handleMessage, handleCounterOfferAmount } from './handlers/message-handler';
 import { getExistingBid, getLoadRequestById } from './services/bid-service';
 import { findTransporterByChatId, findUserByPhoneNumber, updateTransporterChatId } from './services/transporter-service';
+import { getExternalBidUrl } from './firebase-config';
 import { Contact, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove, TelegramMessage } from './types/telegram';
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -224,42 +225,28 @@ DB: ${projectName}
             }
         }
 
-        // Store pending bid state
-        setPendingBid(chatId, {
-            loadRequestId,
-            displayID: loadRequest.displayID,
-            transporterId: transporter.id,
-            transporterName: transporter.firstName,
-            transporterPhone: transporter.phone,
-            projectName,
-            timestamp: Date.now()
-        });
-
         // Send load info
         const loadInfo = `
-📦 Load Request #${loadRequest.displayID}
+📦 Load Request => ${loadRequest.displayID}
 
 📍 From: ${loadRequest.route.origin}
-📍 To: ${loadRequest.route.destination}
-🚚 Cargo: ${loadRequest.cargo.cargoType}
-⚖️ Weight: ${loadRequest.cargoTotals.totalWeight}
+📍 To: ${loadRequest.route.destination}\n
 📅 Pickup: ${loadRequest.schedule.pickupDate}
 📅 Delivery: ${loadRequest.schedule.deliveryDate}
-    `.trim();
+        `.trim();
 
-        await sendMessage(chatId, loadInfo);
-
-        await sendMessage(
-            chatId,
-            '💰 Please enter your bid amount (ETB):',
+        await sendMessage(chatId, loadInfo,
             {
-                inline_keyboard: [
-                    [{ text: '❌ Cancel', callback_data: `cancel_bid_${loadRequestId}` }]
-                ]
+                inline_keyboard: [[
+                    {
+                        text: '💰 Click Here to Place a Bid',
+                        web_app: { url: getExternalBidUrl(loadRequestId, transporter.uid) }
+                    }
+                ]]
             }
         );
 
-        console.log(`✅ Started bid flow for transporter ${transporter.id} on load ${loadRequestId}`);
+        console.log(`✅ Sent bid Mini App link to transporter ${transporter.id} for load ${loadRequestId}`);
     } catch (error) {
         console.error('Error handling bid deep link:', error);
         await sendMessage(chatId, '❌ An error occurred. Please try again.');
@@ -276,11 +263,10 @@ bot.onText(/\/help/, (msg: TelegramMessage) => {
 /help - Show this help message
 
 How to place a bid:
-1. Click "Place Bid" on a load request post in @pkdouze channel
+1. Click "💰 Place Bid" on a load request post in @pkdouze channel
 2. Verify your phone number if not already verified
-3. Enter your bid amount (ETB)
-4. Enter number of trucks you can provide
-5. Your bid will be submitted to cargo owner
+3. Fill out the bid form in the Mini App
+4. Your bid will be submitted to cargo owner
 
 Need help? Contact support.
   `.trim();

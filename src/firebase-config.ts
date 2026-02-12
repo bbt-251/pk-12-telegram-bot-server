@@ -71,6 +71,15 @@ export function getExternalTransportDetailsUrl(bidID: string, userUID: string): 
     return url
 }
 
+/**
+ * Get external bid placement URL (for Telegram Mini App)
+ */
+export function getExternalBidUrl(loadRequestId: string, transporterId: string): string {
+    const authToken = generateExternalAuthToken(loadRequestId, transporterId)
+    const url = `${externalAppConfig.domain}/external/bid/${loadRequestId}/${transporterId}?authToken=${authToken}`
+    return url
+}
+
 // Manually defined prefixes to match the .env variables
 const prefixes = ['DEVELOPMENT', 'INT',]
 
