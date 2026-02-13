@@ -468,7 +468,7 @@ async function displayUserBids(chatId: number): Promise<void> {
             );
         } else if (bid.status === 'Accepted' && loadRequest?.status !== 'Confirmed') {
             // Show Share Transport Details button for accepted bids
-            const externalUrl = getExternalTransportDetailsUrl(bid.id, transporter.uid);
+            const externalUrl = getExternalTransportDetailsUrl(bid.id, transporter.uid, projectName);
             await sendMessage(
                 chatId,
                 message,
@@ -608,7 +608,7 @@ async function handleAcceptCounterCallback(
 
             // Only show Share Transport Details button if load request is not Confirmed
             if (loadRequest?.status !== 'Confirmed') {
-                const externalUrl = getExternalTransportDetailsUrl(bid.id, transporter.uid);
+                const externalUrl = getExternalTransportDetailsUrl(bid.id, transporter.uid, projectName);
                 await sendMessage(
                     userChatId,
                     `✅ Counter-offer accepted!\n\n` +

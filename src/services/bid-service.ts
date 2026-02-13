@@ -439,11 +439,12 @@ async function editTelegramMessage(
 
     // Build inline keyboard with "Place Bid" button using Telegram Mini App web_app
     // Use 'public' as transporterId for unauthenticated access (auth handled via token)
+    // Use the projectName from the load request to determine the correct environment
     const replyMarkup = {
         inline_keyboard: [[
             {
                 text: "💰 Place Bid",
-                web_app: { url: getExternalBidUrl(loadRequest.id, 'public') }
+                web_app: { url: getExternalBidUrl(loadRequest.id, 'public', projectName) }
             }
         ]]
     };

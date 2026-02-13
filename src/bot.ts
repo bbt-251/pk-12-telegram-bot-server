@@ -240,7 +240,7 @@ DB: ${projectName}
                 inline_keyboard: [[
                     {
                         text: '💰 Click Here to Place a Bid',
-                        web_app: { url: getExternalBidUrl(loadRequestId, transporter.uid) }
+                        web_app: { url: getExternalBidUrl(loadRequestId, transporter.uid, projectName) }
                     }
                 ]]
             }

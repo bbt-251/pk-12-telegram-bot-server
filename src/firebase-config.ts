@@ -24,8 +24,8 @@ const firebaseConfig = {
         messagingSenderId: "1000739929509",
         appId: "1:1000739929509:web:7673409efee40552983c4c",
         adminEnvKey: "NEXT_PUBLIC_FIREBASE_ADMIN_DEVELOPMENT",
-        // domain: "https://pk-12-dev.vercel.app"
-        domain: "https://9mmjk5x1-3010.uks1.devtunnels.ms"
+        domain: "https://pk-12-dev.vercel.app"
+        // domain: "https://9mmjk5x1-3010.uks1.devtunnels.ms"
     },
     int: {
         apiKey: "AIzaSyDzh00Bo-FKP5GS5Tr_TDdM_wGz-DinVnE",
@@ -39,7 +39,26 @@ const firebaseConfig = {
     }
 }
 
-// Use development config by default
+// Map project names to config keys
+function getConfigKey(environment: string): 'dev' | 'int' {
+    const env = environment.toLowerCase()
+    // Map 'development' or 'dev' to 'dev', 'int' stays as 'int'
+    if (env === 'development' || env === 'dev') {
+        return 'dev'
+    }
+    return 'int' // defaults to 'int'
+}
+
+// Dynamic external app configuration based on environment
+export function getExternalAppConfig(environment: string = 'dev'): typeof firebaseConfig.dev {
+    const key = getConfigKey(environment)
+    if (key === 'int' && firebaseConfig.int) {
+        return firebaseConfig.int
+    }
+    return firebaseConfig.dev
+}
+
+// For backward compatibility, keep this export but it should not be used directly
 export const externalAppConfig = firebaseConfig.dev
 
 /**
@@ -64,19 +83,23 @@ export function generateExternalAuthToken(bidID: string, userUID: string): strin
 
 /**
  * Get external transport details URL
+ * @param environment - The environment ('dev' or 'int') to use for the URL
  */
-export function getExternalTransportDetailsUrl(bidID: string, userUID: string): string {
+export function getExternalTransportDetailsUrl(bidID: string, userUID: string, environment: string = 'dev'): string {
+    const config = getExternalAppConfig(environment)
     const authToken = generateExternalAuthToken(bidID, userUID)
-    const url = `${externalAppConfig.domain}/external/${bidID}/${userUID}?authToken=${authToken}`
+    const url = `${config.domain}/external/${bidID}/${userUID}?authToken=${authToken}`
     return url
 }
 
 /**
  * Get external bid placement URL (for Telegram Mini App)
+ * @param environment - The environment ('dev' or 'int') to use for the URL
  */
-export function getExternalBidUrl(loadRequestId: string, transporterId: string): string {
+export function getExternalBidUrl(loadRequestId: string, transporterId: string, environment: string = 'dev'): string {
+    const config = getExternalAppConfig(environment)
     const authToken = generateExternalAuthToken(loadRequestId, transporterId)
-    const url = `${externalAppConfig.domain}/external/bid/${loadRequestId}/${transporterId}?authToken=${authToken}`
+    const url = `${config.domain}/external/bid/${loadRequestId}/${transporterId}?authToken=${authToken}`
     return url
 }
 
