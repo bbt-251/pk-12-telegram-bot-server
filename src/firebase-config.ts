@@ -24,7 +24,7 @@ const firebaseConfig = {
         messagingSenderId: "1000739929509",
         appId: "1:1000739929509:web:7673409efee40552983c4c",
         adminEnvKey: "NEXT_PUBLIC_FIREBASE_ADMIN_DEVELOPMENT",
-        domain: "https://pk-12-dev.vercel.app"
+        domain: process.env.NODE_ENV === "development" ? "https://9mmjk5x1-3010.uks1.devtunnels.ms" : "https://pk-12-dev.vercel.app"
         // domain: "https://9mmjk5x1-3010.uks1.devtunnels.ms"
     },
     int: {
