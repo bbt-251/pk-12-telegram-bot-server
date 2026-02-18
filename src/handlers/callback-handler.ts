@@ -1,17 +1,17 @@
-import TelegramBot from 'node-telegram-bot-api';
-import { findTransporterByChatId } from '../services/transporter-service';
+import TelegramBot from "node-telegram-bot-api";
+import { findTransporterByChatId } from "../services/transporter-service";
 import {
     getLoadRequestById,
     hasExistingBid,
     getBidsByTransporter,
     getBidById,
     acceptCounterOffer,
-    transporterCounterOffer
-} from '../services/bid-service';
-import { sendMessage } from '../bot';
-import { confirmBid } from './message-handler';
-import { formatDate } from '../dayjs_util';
-import { getExternalTransportDetailsUrl } from '../firebase-config';
+    transporterCounterOffer,
+} from "../services/bid-service";
+import { sendMessage } from "../bot";
+import { confirmBid } from "./message-handler";
+import { formatDate } from "../dayjs_util";
+import { getExternalTransportDetailsUrl } from "../firebase-config";
 
 interface PendingBid {
     loadRequestId: string;
@@ -51,29 +51,29 @@ export async function handleCallbackQuery(
     callbackId: string,
     data: string,
     chatId: number,
-    userId?: number
+    userId?: number,
 ): Promise<void> {
     console.log(`🔔 Received callback: ${data} from chat ${chatId}, user ${userId}`);
 
     // Parse callback data
-    if (data.startsWith('place_bid_')) {
-        const loadRequestId = data.replace('place_bid_', '');
+    if (data.startsWith("place_bid_")) {
+        const loadRequestId = data.replace("place_bid_", "");
         await handlePlaceBidCallback(bot, callbackId, loadRequestId, chatId, userId);
-    } else if (data.startsWith('cancel_bid_')) {
+    } else if (data.startsWith("cancel_bid_")) {
         await handleCancelBidCallback(bot, callbackId, chatId, userId);
-    } else if (data.startsWith('confirm_bid_')) {
+    } else if (data.startsWith("confirm_bid_")) {
         await handleConfirmBidCallback(bot, callbackId, chatId, userId);
-    } else if (data.startsWith('edit_bid_')) {
+    } else if (data.startsWith("edit_bid_")) {
         await handleEditBidCallback(bot, callbackId, data, chatId, userId);
-    } else if (data === 'view_my_bids') {
+    } else if (data === "view_my_bids") {
         await handleViewMyBidsCallback(bot, callbackId, chatId, userId);
-    } else if (data.startsWith('ac:')) {
+    } else if (data.startsWith("ac:")) {
         await handleAcceptCounterCallback(bot, callbackId, data, chatId, userId);
-    } else if (data.startsWith('co:')) {
+    } else if (data.startsWith("co:")) {
         await handleCounterOfferCallback(bot, callbackId, data, chatId, userId);
-    } else if (data.startsWith('confirm_counter_')) {
+    } else if (data.startsWith("confirm_counter_")) {
         await handleConfirmCounterOfferCallback(bot, callbackId, data, chatId, userId);
-    } else if (data.startsWith('cancel_counter_')) {
+    } else if (data.startsWith("cancel_counter_")) {
         await handleCancelCounterOfferCallback(bot, callbackId, data, chatId, userId);
     } else {
         // Answer callback to remove loading state
@@ -89,26 +89,26 @@ async function handlePlaceBidCallback(
     callbackId: string,
     loadRequestId: string,
     chatId: number,
-    userId?: number
+    userId?: number,
 ): Promise<void> {
     try {
         // Use userId (user's private chat ID) to find transporter, not the channel/group chatId
         const userChatId = userId || chatId;
 
-        console.log("callbackId: ", callbackId)
-        console.log("loadRequestId: ", loadRequestId)
-        console.log("chatId (channel): ", chatId)
-        console.log("userId (user): ", userId)
-        console.log("userChatId (searching for): ", userChatId)
+        console.log("callbackId: ", callbackId);
+        console.log("loadRequestId: ", loadRequestId);
+        console.log("chatId (channel): ", chatId);
+        console.log("userId (user): ", userId);
+        console.log("userChatId (searching for): ", userChatId);
 
         // Find transporter by Telegram user ID (private chat ID)
         const result = await findTransporterByChatId(userChatId);
-        console.log("result: ", result)
+        console.log("result: ", result);
 
         if (!result) {
             await bot.answerCallbackQuery(callbackId, {
-                text: '❌ You must be a registered transporter to place bids. Please use /start to verify your phone number.',
-                show_alert: true
+                text: "❌ You must be a registered transporter to place bids. Please use /start to verify your phone number.",
+                show_alert: true,
             });
             return;
         }
@@ -136,25 +136,27 @@ Debug:
 Load Request Data ID: ${loadRequestId}
 DB: ${projectName}
 ---`,
-                show_alert: true
+                show_alert: true,
             });
             return;
         }
 
         // If load request has a projectId field, validate it matches
         if (loadRequest.projectId && loadRequest.projectId !== projectName) {
-            console.log(`Project mismatch: load request project=${loadRequest.projectId}, expected=${projectName}`)
+            console.log(
+                `Project mismatch: load request project=${loadRequest.projectId}, expected=${projectName}`,
+            );
             await bot.answerCallbackQuery(callbackId, {
                 text: `❌ This load request is from a different project.\n\nYour account: ${projectName}\nLoad request: ${loadRequest.projectId}`,
-                show_alert: true
+                show_alert: true,
             });
             return;
         }
 
-        if (loadRequest.status !== 'Open') {
+        if (loadRequest.status !== "Open") {
             await bot.answerCallbackQuery(callbackId, {
-                text: '❌ This load request is no longer open for bidding.',
-                show_alert: true
+                text: "❌ This load request is no longer open for bidding.",
+                show_alert: true,
             });
             return;
         }
@@ -164,8 +166,8 @@ DB: ${projectName}
 
         if (existingBid) {
             await bot.answerCallbackQuery(callbackId, {
-                text: '❌ You have already placed a bid on this load request.',
-                show_alert: true
+                text: "❌ You have already placed a bid on this load request.",
+                show_alert: true,
             });
             return;
         }
@@ -178,13 +180,13 @@ DB: ${projectName}
             transporterName: transporter.firstName,
             transporterPhone: transporter.phone,
             projectName,
-            timestamp: Date.now()
+            timestamp: Date.now(),
         });
 
         // Answer callback to remove loading state
         await bot.answerCallbackQuery(callbackId, {
-            text: '✅ Check your private chat with the bot to place your bid!',
-            show_alert: true
+            text: "✅ Check your private chat with the bot to place your bid!",
+            show_alert: true,
         });
 
         // Send bid form message to user's private chat
@@ -201,22 +203,20 @@ DB: ${projectName}
 
         await sendMessage(userChatId, loadInfo);
 
-        await sendMessage(
-            userChatId,
-            '💰 Please enter your bid amount (ETB):',
-            {
-                inline_keyboard: [
-                    [{ text: '❌ Cancel', callback_data: `cancel_bid_${loadRequestId}` }]
-                ]
-            }
-        );
+        await sendMessage(userChatId, "💰 Please enter your bid amount (ETB):", {
+            inline_keyboard: [
+                [{ text: "❌ Cancel", callback_data: `cancel_bid_${loadRequestId}` }],
+            ],
+        });
 
-        console.log(`✅ Started bid flow for transporter ${transporter.id} on load ${loadRequestId}`);
+        console.log(
+            `✅ Started bid flow for transporter ${transporter.id} on load ${loadRequestId}`,
+        );
     } catch (error) {
-        console.error('Error handling place bid callback:', error);
+        console.error("Error handling place bid callback:", error);
         await bot.answerCallbackQuery(callbackId, {
-            text: '❌ An error occurred. Please try again.',
-            show_alert: true
+            text: "❌ An error occurred. Please try again.",
+            show_alert: true,
         });
     }
 }
@@ -228,7 +228,7 @@ async function handleCancelBidCallback(
     bot: TelegramBot,
     callbackId: string,
     chatId: number,
-    userId?: number
+    userId?: number,
 ): Promise<void> {
     // Use userId (user's private chat ID) to clear pending bid
     const userChatId = userId || chatId;
@@ -237,7 +237,7 @@ async function handleCancelBidCallback(
     pendingBids.delete(userChatId);
 
     await bot.answerCallbackQuery(callbackId);
-    await sendMessage(userChatId, '❌ Bid cancelled.');
+    await sendMessage(userChatId, "❌ Bid cancelled.");
 }
 
 /**
@@ -247,7 +247,7 @@ async function handleConfirmBidCallback(
     bot: TelegramBot,
     callbackId: string,
     chatId: number,
-    userId?: number
+    userId?: number,
 ): Promise<void> {
     // Use userId (user's private chat ID)
     const userChatId = userId || chatId;
@@ -269,112 +269,18 @@ async function handleEditBidCallback(
     callbackId: string,
     data: string,
     chatId: number,
-    userId?: number
+    serId?: number,
 ): Promise<void> {
-    // Use userId (user's private chat ID)
-    const userChatId = userId || chatId;
-
-    // Parse bid ID from callback data
-    const bidId = data.replace('edit_bid_', '');
-
-    try {
-        // Find transporter
-        const result = await findTransporterByChatId(userChatId);
-        if (!result) {
-            await bot.answerCallbackQuery(callbackId, {
-                text: '❌ You must be a registered transporter to edit bids.',
-                show_alert: true
-            });
-            return;
-        }
-
-        const { transporter, projectName } = result;
-
-        // Get the bid
-        const bid = await getBidById(bidId, projectName);
-        if (!bid) {
-            await bot.answerCallbackQuery(callbackId, {
-                text: '❌ Bid not found.',
-                show_alert: true
-            });
-            return;
-        }
-
-        // Verify this bid belongs to the transporter
-        if (bid.transporterId !== transporter.uid) {
-            await bot.answerCallbackQuery(callbackId, {
-                text: '❌ This bid does not belong to you.',
-                show_alert: true
-            });
-            return;
-        }
-
-        // Get the load request
-        const loadRequest = await getLoadRequestById(bid.loadRequestID, projectName);
-        if (!loadRequest) {
-            await bot.answerCallbackQuery(callbackId, {
-                text: '❌ Load request not found.',
-                show_alert: true
-            });
-            return;
-        }
-
-        // Check if bid can be edited (must be Pending)
-        if (bid.status !== 'Pending') {
-            await bot.answerCallbackQuery(callbackId, {
-                text: '❌ This bid can no longer be edited.',
-                show_alert: true
-            });
-            return;
-        }
-
-        // Set up pending bid with existing bid ID for editing
-        setPendingBidWithExistingId(userChatId, {
-            loadRequestId: bid.loadRequestID,
-            displayID: loadRequest.displayID,
-            transporterId: transporter.id,
-            transporterName: transporter.firstName,
-            transporterPhone: transporter.phone,
-            projectName,
-            timestamp: Date.now()
-        }, bidId);
-
-        // Answer callback to remove loading state
-        await bot.answerCallbackQuery(callbackId);
-
-        // Send load info
-        const loadInfo = `
-📦 Load Request #${loadRequest.displayID}
-
-📍 From: ${loadRequest.route.origin}
-📍 To: ${loadRequest.route.destination}
-🚚 Cargo: ${loadRequest.cargo.cargoType}
-⚖️ Weight: ${loadRequest.cargoTotals.totalWeight}
-📅 Pickup: ${loadRequest.schedule.pickupDate}
-📅 Delivery: ${loadRequest.schedule.deliveryDate}
-        `.trim();
-
-        await sendMessage(userChatId, loadInfo);
-
-        // Send edit form with pre-filled current bid amount
-        await sendMessage(
-            userChatId,
-            `📝 Edit your bid\n\nCurrent bid: ETB ${bid.pricing.amount.toLocaleString()}\n\nPlease enter your new bid amount (ETB):`,
-            {
-                inline_keyboard: [
-                    [{ text: '❌ Cancel', callback_data: `cancel_bid_${bid.loadRequestID}` }]
-                ]
-            }
-        );
-
-        console.log(`✅ Started edit flow for bid ${bidId} on load ${bid.loadRequestID}`);
-    } catch (error) {
-        console.error('Error handling edit bid callback:', error);
-        await bot.answerCallbackQuery(callbackId, {
-            text: '❌ An error occurred. Please try again.',
-            show_alert: true
-        });
-    }
+    console.info({
+        data,
+        chatId,
+        serId,
+    });
+    // Reject edit attempts - one bid per user per load-request, no updates allowed
+    await bot.answerCallbackQuery(callbackId, {
+        text: "❌ Editing bids is not allowed.",
+        show_alert: true,
+    });
 }
 
 /**
@@ -384,7 +290,7 @@ async function handleViewMyBidsCallback(
     bot: TelegramBot,
     callbackId: string,
     chatId: number,
-    userId?: number
+    userId?: number,
 ): Promise<void> {
     // Use userId (user's private chat ID)
     const userChatId = userId || chatId;
@@ -399,9 +305,7 @@ async function handleViewMyBidsCallback(
 /**
  * Handle "View My Bids" text message (keyboard button)
  */
-export async function handleViewMyBidsText(
-    chatId: number
-): Promise<void> {
+export async function handleViewMyBidsText(chatId: number): Promise<void> {
     await displayUserBids(chatId);
 }
 
@@ -412,7 +316,10 @@ async function displayUserBids(chatId: number): Promise<void> {
     // Find transporter
     const result = await findTransporterByChatId(chatId);
     if (!result) {
-        await sendMessage(chatId, '❌ You must be a registered transporter to view bids. Please use /start to verify your phone number.');
+        await sendMessage(
+            chatId,
+            "❌ You must be a registered transporter to view bids. Please use /start to verify your phone number.",
+        );
         return;
     }
 
@@ -422,18 +329,21 @@ async function displayUserBids(chatId: number): Promise<void> {
     const bids = await getBidsByTransporter(transporter.uid, projectName);
 
     if (bids.length === 0) {
-        await sendMessage(chatId, '📋 You haven\'t placed any bids yet. Browse load requests to place your first bid!');
+        await sendMessage(
+            chatId,
+            "📋 You haven't placed any bids yet. Browse load requests to place your first bid!",
+        );
         return;
     }
 
     // Format status with emoji
     const statusEmoji: Record<string, string> = {
-        'Pending': '⏳',
-        'Accepted': '✅',
-        'Rejected': '❌',
-        'Counter Offer': '💰',
-        'Withdrawn': '🚫',
-        'Expired': '⏰'
+        Pending: "⏳",
+        Accepted: "✅",
+        Rejected: "❌",
+        "Counter Offer": "💰",
+        Withdrawn: "🚫",
+        Expired: "⏰",
     };
 
     // Send individual message for each bid
@@ -442,7 +352,7 @@ async function displayUserBids(chatId: number): Promise<void> {
         const loadRequest = await getLoadRequestById(bid.loadRequestID, projectName);
         const displayID = loadRequest?.displayID || bid.loadRequestID;
 
-        const emoji = statusEmoji[bid.status] || '📌';
+        const emoji = statusEmoji[bid.status] || "📌";
 
         let message = `${emoji} <b>${displayID}</b>\n`;
         message += `💰 Bid: ETB ${bid.pricing.amount.toLocaleString()}\n`;
@@ -455,32 +365,23 @@ async function displayUserBids(chatId: number): Promise<void> {
         }
 
         // Add buttons based on bid status
-        if (bid.status === 'Pending') {
-            // Show Edit button for pending bids
-            await sendMessage(
-                chatId,
-                message,
-                {
-                    inline_keyboard: [[
-                        { text: "✏️ Edit", callback_data: `edit_bid_${bid.id}` }
-                    ]]
-                }
-            );
-        } else if (bid.status === 'Accepted' && loadRequest?.status !== 'Confirmed') {
+        if (bid.status === "Accepted" && loadRequest?.status !== "Confirmed") {
             // Show Share Transport Details button for accepted bids
-            const externalUrl = getExternalTransportDetailsUrl(bid.id, transporter.uid, projectName);
-            await sendMessage(
-                chatId,
-                message,
-                {
-                    inline_keyboard: [[
+            const externalUrl = getExternalTransportDetailsUrl(
+                bid.id,
+                transporter.uid,
+                projectName,
+            );
+            await sendMessage(chatId, message, {
+                inline_keyboard: [
+                    [
                         {
                             text: "📋 Share Transport Details",
-                            web_app: { url: externalUrl }
-                        }
-                    ]]
-                }
-            );
+                            web_app: { url: externalUrl },
+                        },
+                    ],
+                ],
+            });
         } else {
             await sendMessage(chatId, message);
         }
@@ -506,10 +407,14 @@ export function setPendingBid(chatId: number, bid: PendingBid): void {
 /**
  * Set pending bid for a chat with existing bid ID (for editing)
  */
-export function setPendingBidWithExistingId(chatId: number, bid: PendingBid, existingBidId?: string): void {
+export function setPendingBidWithExistingId(
+    chatId: number,
+    bid: PendingBid,
+    existingBidId?: string,
+): void {
     const pendingBidWithId: PendingBid = {
         ...bid,
-        existingBidId: existingBidId || undefined
+        existingBidId: existingBidId || undefined,
     };
     pendingBids.set(chatId, pendingBidWithId);
 }
@@ -557,7 +462,7 @@ async function handleAcceptCounterCallback(
     callbackId: string,
     data: string,
     chatId: number,
-    userId?: number
+    userId?: number,
 ): Promise<void> {
     const userChatId = userId || chatId;
 
@@ -566,8 +471,8 @@ async function handleAcceptCounterCallback(
         const result = await findTransporterByChatId(userChatId);
         if (!result) {
             await bot.answerCallbackQuery(callbackId, {
-                text: '❌ You must be a registered transporter. Please use /start to verify your phone number.',
-                show_alert: true
+                text: "❌ You must be a registered transporter. Please use /start to verify your phone number.",
+                show_alert: true,
             });
             return;
         }
@@ -576,14 +481,14 @@ async function handleAcceptCounterCallback(
 
         // Parse bid ID from callback data
         // Callback data format: ac:<bidId>
-        const bidId = data.replace('ac:', '');
+        const bidId = data.replace("ac:", "");
 
         // Get the bid
         const bid = await getBidById(bidId, projectName);
         if (!bid) {
             await bot.answerCallbackQuery(callbackId, {
-                text: '❌ Bid not found.',
-                show_alert: true
+                text: "❌ Bid not found.",
+                show_alert: true,
             });
             return;
         }
@@ -591,8 +496,8 @@ async function handleAcceptCounterCallback(
         // Verify this bid belongs to the transporter
         if (bid.transporterId !== transporter.uid) {
             await bot.answerCallbackQuery(callbackId, {
-                text: '❌ This bid does not belong to you.',
-                show_alert: true
+                text: "❌ This bid does not belong to you.",
+                show_alert: true,
             });
             return;
         }
@@ -607,44 +512,50 @@ async function handleAcceptCounterCallback(
             const loadRequest = await getLoadRequestById(bid.loadRequestID, projectName);
 
             // Only show Share Transport Details button if load request is not Confirmed
-            if (loadRequest?.status !== 'Confirmed') {
-                const externalUrl = getExternalTransportDetailsUrl(bid.id, transporter.uid, projectName);
+            if (loadRequest?.status !== "Confirmed") {
+                const externalUrl = getExternalTransportDetailsUrl(
+                    bid.id,
+                    transporter.uid,
+                    projectName,
+                );
                 await sendMessage(
                     userChatId,
                     `✅ Counter-offer accepted!\n\n` +
-                    `📦 Load Request: #${loadRequest?.displayID || bid.loadRequestID}\n` +
-                    `💰 Final Bid Amount: ETB ${updatedBid.pricing.amount.toLocaleString()}\n\n` +
-                    `The cargo owner has been notified. You can now share transport details.`,
+                        `📦 Load Request: #${loadRequest?.displayID || bid.loadRequestID}\n` +
+                        `💰 Final Bid Amount: ETB ${updatedBid.pricing.amount.toLocaleString()}\n\n` +
+                        `The cargo owner has been notified. You can now share transport details.`,
                     {
-                        inline_keyboard: [[
-                            {
-                                text: "📋 Share Transport Details",
-                                web_app: { url: externalUrl }
-                            }
-                        ]]
-                    }
+                        inline_keyboard: [
+                            [
+                                {
+                                    text: "📋 Share Transport Details",
+                                    web_app: { url: externalUrl },
+                                },
+                            ],
+                        ],
+                    },
                 );
             } else {
                 await sendMessage(
                     userChatId,
                     `✅ Counter-offer accepted!\n\n` +
-                    `📦 Load Request: #${loadRequest?.displayID || bid.loadRequestID}\n` +
-                    `💰 Final Bid Amount: ETB ${updatedBid.pricing.amount.toLocaleString()}\n\n` +
-                    `The cargo owner has been notified.`
+                        `📦 Load Request: #${loadRequest?.displayID || bid.loadRequestID}\n` +
+                        `💰 Final Bid Amount: ETB ${updatedBid.pricing.amount.toLocaleString()}\n\n` +
+                        `The cargo owner has been notified.`,
                 );
             }
             console.log(`✅ Transporter ${transporter.id} accepted counter offer for bid ${bidId}`);
         } else {
             await bot.answerCallbackQuery(callbackId, {
-                text: '❌ Failed to accept counter offer. Please try again.',
-                show_alert: true
+                text: "❌ Failed to accept counter offer. Please try again.",
+                show_alert: true,
             });
         }
     } catch (error) {
-        console.error('Error accepting counter offer:', error);
+        console.error("Error accepting counter offer:", error);
         await bot.answerCallbackQuery(callbackId, {
-            text: '❌ An error occurred. Please try again.',
-            show_alert: true
+            text: "❌ An error occurred. Please try again.",
+            show_alert: true,
         });
     }
 }
@@ -657,7 +568,7 @@ async function handleCounterOfferCallback(
     callbackId: string,
     data: string,
     chatId: number,
-    userId?: number
+    userId?: number,
 ): Promise<void> {
     const userChatId = userId || chatId;
 
@@ -666,8 +577,8 @@ async function handleCounterOfferCallback(
         const result = await findTransporterByChatId(userChatId);
         if (!result) {
             await bot.answerCallbackQuery(callbackId, {
-                text: '❌ You must be a registered transporter. Please use /start to verify your phone number.',
-                show_alert: true
+                text: "❌ You must be a registered transporter. Please use /start to verify your phone number.",
+                show_alert: true,
             });
             return;
         }
@@ -676,14 +587,14 @@ async function handleCounterOfferCallback(
 
         // Parse bid ID from callback data
         // Callback data format: co:<bidId>
-        const bidId = data.replace('co:', '');
+        const bidId = data.replace("co:", "");
 
         // Get the bid
         const bid = await getBidById(bidId, projectName);
         if (!bid) {
             await bot.answerCallbackQuery(callbackId, {
-                text: '❌ Bid not found.',
-                show_alert: true
+                text: "❌ Bid not found.",
+                show_alert: true,
             });
             return;
         }
@@ -691,8 +602,8 @@ async function handleCounterOfferCallback(
         // Verify this bid belongs to the transporter
         if (bid.transporterId !== transporter.id) {
             await bot.answerCallbackQuery(callbackId, {
-                text: '❌ This bid does not belong to you.',
-                show_alert: true
+                text: "❌ This bid does not belong to you.",
+                show_alert: true,
             });
             return;
         }
@@ -709,7 +620,7 @@ async function handleCounterOfferCallback(
             loadRequestDisplayID: displayID,
             counterAmount: 0,
             originalBidAmount: bid.pricing.amount,
-            timestamp: Date.now()
+            timestamp: Date.now(),
         });
 
         // Answer callback to remove loading state
@@ -719,19 +630,19 @@ async function handleCounterOfferCallback(
         await sendMessage(
             userChatId,
             `💰 Enter your counter-offer amount:\n\n` +
-            `📦 Load Request: #${displayID}\n` +
-            `💰 Current Offer: ETB ${bid.pricing.amount.toLocaleString()}\n\n` +
-            `Please enter your counter-offer amount (ETB):`
+                `📦 Load Request: #${displayID}\n` +
+                `💰 Current Offer: ETB ${bid.pricing.amount.toLocaleString()}\n\n` +
+                `Please enter your counter-offer amount (ETB):`,
         );
 
         console.log(`✅ Started counter offer flow for bid ${bidId}`);
 
         console.log(`✅ Started counter offer flow for bid ${bidId}`);
     } catch (error) {
-        console.error('Error starting counter offer:', error);
+        console.error("Error starting counter offer:", error);
         await bot.answerCallbackQuery(callbackId, {
-            text: '❌ An error occurred. Please try again.',
-            show_alert: true
+            text: "❌ An error occurred. Please try again.",
+            show_alert: true,
         });
     }
 }
@@ -744,7 +655,7 @@ async function handleConfirmCounterOfferCallback(
     callbackId: string,
     _data: string,
     chatId: number,
-    userId?: number
+    userId?: number,
 ): Promise<void> {
     const userChatId = userId || chatId;
 
@@ -753,8 +664,8 @@ async function handleConfirmCounterOfferCallback(
         const result = await findTransporterByChatId(userChatId);
         if (!result) {
             await bot.answerCallbackQuery(callbackId, {
-                text: '❌ You must be a registered transporter.',
-                show_alert: true
+                text: "❌ You must be a registered transporter.",
+                show_alert: true,
             });
             return;
         }
@@ -765,8 +676,8 @@ async function handleConfirmCounterOfferCallback(
         const state = getCounterOfferStateByChatId(userChatId);
         if (!state) {
             await bot.answerCallbackQuery(callbackId, {
-                text: '❌ Counter offer session expired. Please start over.',
-                show_alert: true
+                text: "❌ Counter offer session expired. Please start over.",
+                show_alert: true,
             });
             return;
         }
@@ -775,8 +686,8 @@ async function handleConfirmCounterOfferCallback(
         const updatedBid = await transporterCounterOffer(
             state.bidId,
             state.counterAmount,
-            `${transporter.firstName} ${transporter.lastName || ''}`.trim(),
-            projectName
+            `${transporter.firstName} ${transporter.lastName || ""}`.trim(),
+            projectName,
         );
 
         if (updatedBid) {
@@ -784,26 +695,28 @@ async function handleConfirmCounterOfferCallback(
             await sendMessage(
                 userChatId,
                 `✅ Your counter-offer of ETB ${state.counterAmount.toLocaleString()} has been sent to the cargo owner.\n\n` +
-                `📦 Load Request: #${state.loadRequestDisplayID}\n` +
-                `💰 Your Counter-Offer: ETB ${state.counterAmount.toLocaleString()}`
+                    `📦 Load Request: #${state.loadRequestDisplayID}\n` +
+                    `💰 Your Counter-Offer: ETB ${state.counterAmount.toLocaleString()}`,
             );
 
             // Clear counter offer state
             clearCounterOfferStateByChatId(userChatId);
             counterOfferStates.delete(userChatId);
 
-            console.log(`✅ Transporter ${transporter.firstName} ${transporter.lastName} (${transporter.uid}) submitted counter offer for bid ${state.bidId}`);
+            console.log(
+                `✅ Transporter ${transporter.firstName} ${transporter.lastName} (${transporter.uid}) submitted counter offer for bid ${state.bidId}`,
+            );
         } else {
             await bot.answerCallbackQuery(callbackId, {
-                text: '❌ Failed to submit counter offer. Please try again.',
-                show_alert: true
+                text: "❌ Failed to submit counter offer. Please try again.",
+                show_alert: true,
             });
         }
     } catch (error) {
-        console.error('Error confirming counter offer:', error);
+        console.error("Error confirming counter offer:", error);
         await bot.answerCallbackQuery(callbackId, {
-            text: '❌ An error occurred. Please try again.',
-            show_alert: true
+            text: "❌ An error occurred. Please try again.",
+            show_alert: true,
         });
     }
 }
@@ -816,7 +729,7 @@ async function handleCancelCounterOfferCallback(
     callbackId: string,
     _data: string,
     chatId: number,
-    userId?: number
+    userId?: number,
 ): Promise<void> {
     const userChatId = userId || chatId;
 
@@ -825,7 +738,7 @@ async function handleCancelCounterOfferCallback(
     counterOfferStates.delete(userChatId);
 
     await bot.answerCallbackQuery(callbackId);
-    await sendMessage(userChatId, '❌ Counter offer cancelled.');
+    await sendMessage(userChatId, "❌ Counter offer cancelled.");
 }
 
 /**
@@ -866,3 +779,4 @@ export function cleanupExpiredCounterOfferStates(): void {
 
 // Run cleanup every 5 minutes
 setInterval(cleanupExpiredCounterOfferStates, 5 * 60 * 1000);
+
