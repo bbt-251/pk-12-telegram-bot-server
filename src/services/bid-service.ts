@@ -1,4 +1,8 @@
-import { getHealthyDbInstances, retryDatabaseOperation, getExternalBidUrl } from '../firebase-config';
+import {
+    getHealthyDbInstances,
+    retryDatabaseOperation,
+    getExternalBidUrl,
+} from '../firebase-config';
 import { Bid, BidStatus, OfferHistory } from '../models/bid';
 import { LoadRequest, LowestBidInfo } from '../models/load-request';
 import admin from 'firebase-admin';
@@ -12,7 +16,7 @@ export async function createBid(
     transporterName: string,
     bidAmount: number,
     numberOfTrucks: number,
-    projectName: string
+    projectName: string,
 ): Promise<Bid> {
     const db = (await getHealthyDbInstances())[projectName];
     if (!db) {
@@ -40,30 +44,39 @@ export async function createBid(
             amount: bidAmount,
             currency: 'ETB',
             includesInsurance: false,
-            includesFuel: true
+            includesFuel: true,
         },
         trucksProvided: numberOfTrucks,
         status: BidStatus.PENDING,
         isWinner: false,
         isAccepted: false,
-        offerHistory: [{
-            id: crypto.randomUUID(),
-            amount: bidAmount,
-            currency: 'ETB',
-            type: 'initial',
-            offeredBy: 'transporter',
-            offeredByName: transporterName,
-            timestamp: now
-        }],
+        offerHistory: [
+            {
+                id: crypto.randomUUID(),
+                amount: bidAmount,
+                currency: 'ETB',
+                type: 'initial',
+                offeredBy: 'transporter',
+                offeredByName: transporterName,
+                timestamp: now,
+            },
+        ],
         createdAt: admin.firestore.Timestamp.fromDate(new Date(now)),
-        updatedAt: admin.firestore.Timestamp.fromDate(new Date(now))
+        updatedAt: admin.firestore.Timestamp.fromDate(new Date(now)),
     };
 
-    await retryDatabaseOperation(async () => {
-        await bidRef.set(bid);
-    }, 2, 1000, projectName);
+    await retryDatabaseOperation(
+        async () => {
+            await bidRef.set(bid);
+        },
+        2,
+        1000,
+        projectName,
+    );
 
-    console.log(`✅ Created bid ${bidId} for load ${actualLoadRequestId} by transporter ${transporterId}`);
+    console.log(
+        `✅ Created bid ${bidId} for load ${actualLoadRequestId} by transporter ${transporterId}`,
+    );
     return bid;
 }
 
@@ -74,7 +87,7 @@ export async function createBid(
 export async function hasExistingBid(
     loadRequestId: string,
     transporterId: string,
-    projectName: string
+    projectName: string,
 ): Promise<boolean> {
     const db = (await getHealthyDbInstances())[projectName];
     if (!db) {
@@ -89,13 +102,19 @@ export async function hasExistingBid(
         actualLoadRequestId = loadRequestId.replace(`${firebaseProjectId}_`, '');
     }
 
-    const query = await retryDatabaseOperation(async () => {
-        return await db.collection('bids')
-            .where('loadRequestID', '==', actualLoadRequestId)
-            .where('transporterId', '==', transporterId)
-            .limit(1)
-            .get();
-    }, 2, 1000, projectName);
+    const query = await retryDatabaseOperation(
+        async () => {
+            return await db
+                .collection('bids')
+                .where('loadRequestID', '==', actualLoadRequestId)
+                .where('transporterId', '==', transporterId)
+                .limit(1)
+                .get();
+        },
+        2,
+        1000,
+        projectName,
+    );
 
     return !query.empty;
 }
@@ -107,8 +126,8 @@ export async function hasExistingBid(
 export async function getExistingBid(
     loadRequestId: string,
     transporterId: string,
-    projectName: string
-): Promise<{ bid: Bid; canEdit: boolean } | null> {
+    projectName: string,
+): Promise<{ bid: Bid } | null> {
     const db = (await getHealthyDbInstances())[projectName];
     if (!db) {
         throw new Error(`Database for project ${projectName} is not available`);
@@ -122,13 +141,19 @@ export async function getExistingBid(
         actualLoadRequestId = loadRequestId.replace(`${firebaseProjectId}_`, '');
     }
 
-    const query = await retryDatabaseOperation(async () => {
-        return await db.collection('bids')
-            .where('loadRequestID', '==', actualLoadRequestId)
-            .where('transporterId', '==', transporterId)
-            .limit(1)
-            .get();
-    }, 2, 1000, projectName);
+    const query = await retryDatabaseOperation(
+        async () => {
+            return await db
+                .collection('bids')
+                .where('loadRequestID', '==', actualLoadRequestId)
+                .where('transporterId', '==', transporterId)
+                .limit(1)
+                .get();
+        },
+        2,
+        1000,
+        projectName,
+    );
 
     if (query.empty) {
         return null;
@@ -141,10 +166,7 @@ export async function getExistingBid(
 
     const bid = { id: doc.id, ...doc.data() } as Bid;
 
-    // Can edit if bid is not accepted
-    const canEdit = bid.status !== BidStatus.ACCEPTED;
-
-    return { bid, canEdit };
+    return { bid };
 }
 
 /**
@@ -156,7 +178,7 @@ export async function updateBid(
         bidAmount?: number;
         numberOfTrucks?: number;
     },
-    projectName: string
+    projectName: string,
 ): Promise<Bid> {
     const db = (await getHealthyDbInstances())[projectName];
     if (!db) {
@@ -165,7 +187,7 @@ export async function updateBid(
 
     const now = new Date().toISOString();
     const updateData: Record<string, unknown> = {
-        updatedAt: admin.firestore.Timestamp.fromDate(new Date(now))
+        updatedAt: admin.firestore.Timestamp.fromDate(new Date(now)),
     };
 
     if (updates.bidAmount !== undefined) {
@@ -178,7 +200,7 @@ export async function updateBid(
             type: 'initial',
             offeredBy: 'transporter',
             offeredByName: 'Transporter',
-            timestamp: now
+            timestamp: now,
         });
     }
 
@@ -186,14 +208,24 @@ export async function updateBid(
         updateData['trucksProvided'] = updates.numberOfTrucks;
     }
 
-    await retryDatabaseOperation(async () => {
-        await db.collection('bids').doc(bidId).update(updateData);
-    }, 2, 1000, projectName);
+    await retryDatabaseOperation(
+        async () => {
+            await db.collection('bids').doc(bidId).update(updateData);
+        },
+        2,
+        1000,
+        projectName,
+    );
 
     // Fetch and return updated bid
-    const doc = await retryDatabaseOperation(async () => {
-        return await db.collection('bids').doc(bidId).get();
-    }, 2, 1000, projectName);
+    const doc = await retryDatabaseOperation(
+        async () => {
+            return await db.collection('bids').doc(bidId).get();
+        },
+        2,
+        1000,
+        projectName,
+    );
 
     return { id: doc.id, ...doc.data() } as Bid;
 }
@@ -203,7 +235,7 @@ export async function updateBid(
  */
 export async function getLoadRequestById(
     loadRequestId: string,
-    projectName: string
+    projectName: string,
 ): Promise<LoadRequest | null> {
     const healthyDbs = await getHealthyDbInstances();
     const db = healthyDbs[projectName];
@@ -223,9 +255,14 @@ export async function getLoadRequestById(
     }
 
     // Fetch the document
-    const doc = await retryDatabaseOperation(async () => {
-        return await db.collection('loadRequests').doc(docId).get();
-    }, 2, 1000, projectName);
+    const doc = await retryDatabaseOperation(
+        async () => {
+            return await db.collection('loadRequests').doc(docId).get();
+        },
+        2,
+        1000,
+        projectName,
+    );
 
     if (!doc.exists) {
         return null;
@@ -235,7 +272,9 @@ export async function getLoadRequestById(
 
     // If load request has a projectId field, validate it matches the expected project
     if (loadRequest.projectId && loadRequest.projectId !== projectName) {
-        console.log(`Warning: Load request ${loadRequestId} has projectId=${loadRequest.projectId} but was queried from ${projectName}`);
+        console.log(
+            `Warning: Load request ${loadRequestId} has projectId=${loadRequest.projectId} but was queried from ${projectName}`,
+        );
         return null;
     }
 
@@ -247,21 +286,27 @@ export async function getLoadRequestById(
  */
 export async function getBidsByTransporter(
     transporterId: string,
-    projectName: string
+    projectName: string,
 ): Promise<Bid[]> {
     const db = (await getHealthyDbInstances())[projectName];
     if (!db) {
         throw new Error(`Database for project ${projectName} is not available`);
     }
 
-    const query = await retryDatabaseOperation(async () => {
-        return await db.collection('bids')
-            .where('transporterId', '==', transporterId)
-            .orderBy('createdAt', 'desc')
-            .get();
-    }, 2, 1000, projectName);
+    const query = await retryDatabaseOperation(
+        async () => {
+            return await db
+                .collection('bids')
+                .where('transporterId', '==', transporterId)
+                .orderBy('createdAt', 'desc')
+                .get();
+        },
+        2,
+        1000,
+        projectName,
+    );
 
-    return query.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bid));
+    return query.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Bid);
 }
 
 /**
@@ -269,7 +314,7 @@ export async function getBidsByTransporter(
  */
 export async function getBidsForLoadRequest(
     loadRequestId: string,
-    projectName: string
+    projectName: string,
 ): Promise<Bid[]> {
     const db = (await getHealthyDbInstances())[projectName];
     if (!db) {
@@ -284,13 +329,19 @@ export async function getBidsForLoadRequest(
         actualLoadRequestId = loadRequestId.replace(`${firebaseProjectId}_`, '');
     }
 
-    const query = await retryDatabaseOperation(async () => {
-        return await db.collection('bids')
-            .where('loadRequestID', '==', actualLoadRequestId)
-            .get();
-    }, 2, 1000, projectName);
+    const query = await retryDatabaseOperation(
+        async () => {
+            return await db
+                .collection('bids')
+                .where('loadRequestID', '==', actualLoadRequestId)
+                .get();
+        },
+        2,
+        1000,
+        projectName,
+    );
 
-    return query.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bid));
+    return query.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Bid);
 }
 
 /**
@@ -298,7 +349,7 @@ export async function getBidsForLoadRequest(
  */
 export async function getLowestBid(
     loadRequestId: string,
-    projectName: string
+    projectName: string,
 ): Promise<Bid | null> {
     const bids = await getBidsForLoadRequest(loadRequestId, projectName);
 
@@ -325,7 +376,7 @@ export async function getLowestBid(
 export async function updateLowestBidAndTelegram(
     loadRequestId: string,
     newBidAmount: number,
-    projectName: string
+    projectName: string,
 ): Promise<void> {
     try {
         // Get load request
@@ -336,8 +387,10 @@ export async function updateLowestBidAndTelegram(
         }
 
         // Only update if procurement mode is bidding and carrierBidVisibility is true
-        if (loadRequest.biddingSettings?.procurementMode !== 'bidding' ||
-            !loadRequest.biddingSettings?.carrierBidVisibility) {
+        if (
+            loadRequest.biddingSettings?.procurementMode !== 'bidding' ||
+            !loadRequest.biddingSettings?.carrierBidVisibility
+        ) {
             return;
         }
 
@@ -347,7 +400,9 @@ export async function updateLowestBidAndTelegram(
 
         console.log(`📊 Bid comparison for load ${loadRequestId}:`);
         console.log(`   New bid: ETB ${newBidAmount.toLocaleString()}`);
-        console.log(`   lowest bid amount (from load request data): ETB ${currentLowestBid?.toLocaleString() || 'N/A'}`);
+        console.log(
+            `   lowest bid amount (from load request data): ETB ${currentLowestBid?.toLocaleString() || 'N/A'}`,
+        );
         console.log(`   new bid amount to compare: ETB ${newBidAmount.toLocaleString()}`);
         console.log(`   Should update (new < actual)? ${shouldUpdate}`);
 
@@ -370,32 +425,41 @@ export async function updateLowestBidAndTelegram(
             year: 'numeric',
             hour: 'numeric',
             minute: '2-digit',
-            hour12: true
+            hour12: true,
         });
 
         const lowestBidData: LowestBidInfo = {
             amount: newBidAmount,
             currency: 'ETB',
-            updatedAt: now
+            updatedAt: now,
         };
 
         // Use the actual document ID from the fetched load request (may be different from input if prefix was stripped)
         const actualLoadRequestId = loadRequest.id;
 
-        await retryDatabaseOperation(async () => {
-            await db.collection('loadRequests').doc(actualLoadRequestId).update({
-                lowestBid: lowestBidData,
-                updatedAt: now
-            });
-        }, 2, 1000, projectName);
+        await retryDatabaseOperation(
+            async () => {
+                await db.collection('loadRequests').doc(actualLoadRequestId).update({
+                    lowestBid: lowestBidData,
+                    updatedAt: now,
+                });
+            },
+            2,
+            1000,
+            projectName,
+        );
 
-        console.log(`✅ Updated lowest bid for load request ${actualLoadRequestId}: ETB ${newBidAmount.toLocaleString()}`);
+        console.log(
+            `✅ Updated lowest bid for load request ${actualLoadRequestId}: ETB ${newBidAmount.toLocaleString()}`,
+        );
 
         // Update Telegram message if it exists
         if (loadRequest.telegramMessageId) {
             try {
                 await editTelegramMessage(loadRequestId, lowestBidData, projectName);
-                console.log(`✅ Telegram message updated with new lowest bid for load request ${loadRequestId}`);
+                console.log(
+                    `✅ Telegram message updated with new lowest bid for load request ${loadRequestId}`,
+                );
             } catch (telegramError) {
                 console.error('Failed to update Telegram message with lowest bid:', telegramError);
                 // Don't fail operation if Telegram fails
@@ -413,7 +477,7 @@ export async function updateLowestBidAndTelegram(
 async function editTelegramMessage(
     loadRequestId: string,
     lowestBid: LowestBidInfo,
-    projectName: string
+    projectName: string,
 ): Promise<void> {
     // Get the load request to find the telegram message ID
     const loadRequest = await getLoadRequestById(loadRequestId, projectName);
@@ -431,7 +495,9 @@ async function editTelegramMessage(
 
     // Ensure channel ID has correct format
     if (!channelId.startsWith('@') && !channelId.startsWith('-100')) {
-        console.warn(`⚠️ Channel ID "${channelId}" may be invalid. Expected format: @channelname or -100xxxxxxxxxx`);
+        console.warn(
+            `⚠️ Channel ID "${channelId}" may be invalid. Expected format: @channelname or -100xxxxxxxxxx`,
+        );
     }
 
     // Format the new message with lowest bid (using main platform format)
@@ -441,12 +507,16 @@ async function editTelegramMessage(
     // Use 'public' as transporterId for unauthenticated access (auth handled via token)
     // Use the projectName from the load request to determine the correct environment
     const replyMarkup = {
-        inline_keyboard: [[
-            {
-                text: "💰 Place Bid",
-                web_app: { url: getExternalBidUrl(loadRequest.id, 'public', projectName) }
-            }
-        ]]
+        inline_keyboard: [
+            [
+                {
+                    text: '💰 Place Bid',
+                    web_app: {
+                        url: getExternalBidUrl(loadRequest.id, 'public', projectName),
+                    },
+                },
+            ],
+        ],
     };
 
     // Import bot from bot.ts (using dynamic import to avoid circular dependency)
@@ -458,14 +528,24 @@ async function editTelegramMessage(
             chat_id: channelId,
             message_id: loadRequest.telegramMessageId,
             parse_mode: 'Markdown',
-            reply_markup: replyMarkup
+            reply_markup: replyMarkup,
         });
         console.log(`✅ Telegram message updated successfully`);
     } catch (error: unknown) {
-        const telegramError = error as { code?: string; response?: { body?: { description?: string } } };
-        if (telegramError.code === 'ETELEGRAM' && telegramError.response?.body?.description?.includes('MESSAGE_ID_INVALID')) {
-            console.warn(`⚠️ Message ID ${loadRequest.telegramMessageId} not accessible in channel ${channelId}. Skipping edit.`);
-            console.warn(`   This is expected if: 1) message was deleted, 2) bot isn't admin, 3) message was posted by another bot`);
+        const telegramError = error as {
+            code?: string;
+            response?: { body?: { description?: string } };
+        };
+        if (
+            telegramError.code === 'ETELEGRAM' &&
+            telegramError.response?.body?.description?.includes('MESSAGE_ID_INVALID')
+        ) {
+            console.warn(
+                `⚠️ Message ID ${loadRequest.telegramMessageId} not accessible in channel ${channelId}. Skipping edit.`,
+            );
+            console.warn(
+                `   This is expected if: 1) message was deleted, 2) bot isn't admin, 3) message was posted by another bot`,
+            );
         } else {
             throw error; // Re-throw other errors
         }
@@ -477,7 +557,7 @@ async function editTelegramMessage(
  */
 async function formatLoadRequestMessageWithLowestBid(
     loadRequest: LoadRequest,
-    lowestBid: LowestBidInfo
+    lowestBid: LowestBidInfo,
 ): Promise<string> {
     const {
         displayID,
@@ -489,41 +569,52 @@ async function formatLoadRequestMessageWithLowestBid(
         paymentTerms,
         status,
         createdAt,
-        biddingSettings
+        biddingSettings,
     } = loadRequest;
 
     // Format dates
     const formatDate = (dateStr?: string): string => {
-        if (!dateStr) return "N/A";
+        if (!dateStr) return 'N/A';
         const d = new Date(dateStr);
         if (Number.isNaN(d.getTime())) return dateStr;
-        const day = String(d.getDate()).padStart(2, "0");
-        const month = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, '0');
+        const month = String(d.getMonth() + 1).padStart(2, '0');
         const year = String(d.getFullYear()).slice(-2);
         return `${day}/${month}/${year}`;
     };
 
     // Format budget
     const formatBudget = (budget?: string): string => {
-        if (!budget || budget === "N/A") return "N/A";
-        const numeric = Number(String(budget).replace(/,/g, ""));
+        if (!budget || budget === 'N/A') return 'N/A';
+        const numeric = Number(String(budget).replace(/,/g, ''));
         if (Number.isNaN(numeric)) return budget;
         return `ETB ${Number(numeric).toLocaleString()}`;
     };
 
     // Get package types
-    const packageTypes = cargo.packageGroups?.map((pg) => (pg as { packagingType?: string }).packagingType).filter(Boolean).join(", ") || "N/A";
+    const packageTypes =
+        cargo.packageGroups
+            ?.map(pg => (pg as { packagingType?: string }).packagingType)
+            .filter(Boolean)
+            .join(', ') || 'N/A';
 
     // Format container info for containerized packages
     const containerInfoLines: string[] = [];
-    cargo.packageGroups?.forEach((pg) => {
-        const packageGroup = pg as { packagingType?: string; packages?: Array<{ containerType?: string; containerVariant?: string; quantity?: number }> };
-        if (packageGroup.packagingType === "Containerized" && packageGroup.packages) {
-            packageGroup.packages.forEach((pkg) => {
+    cargo.packageGroups?.forEach(pg => {
+        const packageGroup = pg as {
+            packagingType?: string;
+            packages?: Array<{
+                containerType?: string;
+                containerVariant?: string;
+                quantity?: number;
+            }>;
+        };
+        if (packageGroup.packagingType === 'Containerized' && packageGroup.packages) {
+            packageGroup.packages.forEach(pkg => {
                 if (pkg.containerType || pkg.containerVariant) {
                     const quantity = pkg.quantity || 1;
-                    const containerSize = pkg.containerType || "N/A";
-                    const containerType = pkg.containerVariant || "N/A";
+                    const containerSize = pkg.containerType || 'N/A';
+                    const containerType = pkg.containerVariant || 'N/A';
                     containerInfoLines.push(`${quantity} x ${containerSize}(${containerType})`);
                 }
             });
@@ -532,26 +623,27 @@ async function formatLoadRequestMessageWithLowestBid(
 
     // Format special requirements
     const specialRequirements: string[] = [];
-    if (cargo.fragile) specialRequirements.push("Fragile");
-    if (cargo.hazardous) specialRequirements.push("Hazardous");
-    if (cargo.temperatureControlled) specialRequirements.push("Temp Controlled");
-    if (cargo.oversized) specialRequirements.push("Oversized");
+    if (cargo.fragile) specialRequirements.push('Fragile');
+    if (cargo.hazardous) specialRequirements.push('Hazardous');
+    if (cargo.temperatureControlled) specialRequirements.push('Temp Controlled');
+    if (cargo.oversized) specialRequirements.push('Oversized');
 
     // Format budget range
-    const minBudget = paymentTerms.minBudget ? formatBudget(paymentTerms.minBudget) : "N/A";
-    const maxBudget = paymentTerms.maxBudget ? formatBudget(paymentTerms.maxBudget) : "N/A";
-    const budgetDisplay = minBudget !== "N/A" && maxBudget !== "N/A"
-        ? `${minBudget} – ${maxBudget}`
-        : minBudget !== "N/A"
-            ? minBudget
-            : maxBudget !== "N/A"
+    const minBudget = paymentTerms.minBudget ? formatBudget(paymentTerms.minBudget) : 'N/A';
+    const maxBudget = paymentTerms.maxBudget ? formatBudget(paymentTerms.maxBudget) : 'N/A';
+    const budgetDisplay =
+        minBudget !== 'N/A' && maxBudget !== 'N/A'
+            ? `${minBudget} – ${maxBudget}`
+            : minBudget !== 'N/A'
+              ? minBudget
+              : maxBudget !== 'N/A'
                 ? maxBudget
-                : "N/A";
+                : 'N/A';
 
     // Format lowest bid
     const lowestBidDisplay = lowestBid
         ? `💎 *Lowest Bid:* ${lowestBid.currency} ${lowestBid.amount.toLocaleString()}\n`
-        : "";
+        : '';
 
     const message = `
 🚛 *Load Request - ${displayID}*
@@ -563,10 +655,10 @@ async function formatLoadRequestMessageWithLowestBid(
 
 📦 *Cargo:* ${cargo.cargoType}
 📦 *Package Types:* ${packageTypes}
-${containerInfoLines.length > 0 ? `📦 *Container Info:*\n${containerInfoLines.map(info => `   ${info}`).join("\n")}\n` : ""}
+${containerInfoLines.length > 0 ? `📦 *Container Info:*\n${containerInfoLines.map(info => `   ${info}`).join('\n')}\n` : ''}
 ⚖️ *Weight:* ${cargoTotals.totalWeight} KG
 📏 *Volume:* ${cargoTotals.totalVolume} m³
-⚠️ *Special:* ${specialRequirements.join(", ")}\n
+⚠️ *Special:* ${specialRequirements.join(', ')}\n
 📝 *Description:* ${cargo.description || 'N/A'}
 🚛 *Truck Type:* ${truckRequirements.truckBodyType}
 🔢 *Trucks Needed:* ${truckRequirements.numberOfTrucks}
@@ -583,19 +675,21 @@ ${lowestBidDisplay}
 /**
  * Accept a counter offer - updates bid status to Accepted
  */
-export async function acceptCounterOffer(
-    bidId: string,
-    projectName: string
-): Promise<Bid | null> {
+export async function acceptCounterOffer(bidId: string, projectName: string): Promise<Bid | null> {
     const db = (await getHealthyDbInstances())[projectName];
     if (!db) {
         throw new Error(`Database for project ${projectName} is not available`);
     }
 
     const docRef = db.collection('bids').doc(bidId);
-    const doc = await retryDatabaseOperation(async () => {
-        return await docRef.get();
-    }, 2, 1000, projectName);
+    const doc = await retryDatabaseOperation(
+        async () => {
+            return await docRef.get();
+        },
+        2,
+        1000,
+        projectName,
+    );
 
     if (!doc.exists) {
         console.log(`Bid ${bidId} not found`);
@@ -603,21 +697,31 @@ export async function acceptCounterOffer(
     }
 
     // Update bid status to Accepted
-    await retryDatabaseOperation(async () => {
-        await docRef.update({
-            status: BidStatus.ACCEPTED,
-            isAccepted: true,
-            isWinner: true,
-            updatedAt: admin.firestore.Timestamp.now()
-        });
-    }, 2, 1000, projectName);
+    await retryDatabaseOperation(
+        async () => {
+            await docRef.update({
+                status: BidStatus.ACCEPTED,
+                isAccepted: true,
+                isWinner: true,
+                updatedAt: admin.firestore.Timestamp.now(),
+            });
+        },
+        2,
+        1000,
+        projectName,
+    );
 
     console.log(`✅ Counter offer accepted for bid ${bidId}`);
 
     // Return updated bid
-    const updatedDoc = await retryDatabaseOperation(async () => {
-        return await docRef.get();
-    }, 2, 1000, projectName);
+    const updatedDoc = await retryDatabaseOperation(
+        async () => {
+            return await docRef.get();
+        },
+        2,
+        1000,
+        projectName,
+    );
 
     return { id: updatedDoc.id, ...updatedDoc.data() } as Bid;
 }
@@ -629,7 +733,7 @@ export async function transporterCounterOffer(
     bidId: string,
     amount: number,
     transporterName: string,
-    projectName: string
+    projectName: string,
 ): Promise<Bid | null> {
     const db = (await getHealthyDbInstances())[projectName];
     if (!db) {
@@ -637,9 +741,14 @@ export async function transporterCounterOffer(
     }
 
     const docRef = db.collection('bids').doc(bidId);
-    const doc = await retryDatabaseOperation(async () => {
-        return await docRef.get();
-    }, 2, 1000, projectName);
+    const doc = await retryDatabaseOperation(
+        async () => {
+            return await docRef.get();
+        },
+        2,
+        1000,
+        projectName,
+    );
 
     if (!doc.exists) {
         console.log(`Bid ${bidId} not found`);
@@ -658,26 +767,38 @@ export async function transporterCounterOffer(
         type: 'transporter_counter',
         offeredBy: 'transporter',
         offeredByName: transporterName,
-        timestamp: now
+        timestamp: now,
     };
 
     const updatedHistory = [...(existingBid.offerHistory || []), counterOffer];
 
-    await retryDatabaseOperation(async () => {
-        await docRef.update({
-            status: BidStatus.COUNTER_OFFER as BidStatus,
-            'pricing.amount': amount,
-            offerHistory: updatedHistory,
-            updatedAt: admin.firestore.Timestamp.now()
-        });
-    }, 2, 1000, projectName);
+    await retryDatabaseOperation(
+        async () => {
+            await docRef.update({
+                status: BidStatus.COUNTER_OFFER as BidStatus,
+                'pricing.amount': amount,
+                offerHistory: updatedHistory,
+                updatedAt: admin.firestore.Timestamp.now(),
+            });
+        },
+        2,
+        1000,
+        projectName,
+    );
 
-    console.log(`✅ Transporter counter offer added for bid ${bidId}: ETB ${amount.toLocaleString()}`);
+    console.log(
+        `✅ Transporter counter offer added for bid ${bidId}: ETB ${amount.toLocaleString()}`,
+    );
 
     // Return updated bid
-    const updatedDoc = await retryDatabaseOperation(async () => {
-        return await docRef.get();
-    }, 2, 1000, projectName);
+    const updatedDoc = await retryDatabaseOperation(
+        async () => {
+            return await docRef.get();
+        },
+        2,
+        1000,
+        projectName,
+    );
 
     return { id: updatedDoc.id, ...updatedDoc.data() } as Bid;
 }
@@ -685,18 +806,20 @@ export async function transporterCounterOffer(
 /**
  * Get a bid by ID
  */
-export async function getBidById(
-    bidId: string,
-    projectName: string
-): Promise<Bid | null> {
+export async function getBidById(bidId: string, projectName: string): Promise<Bid | null> {
     const db = (await getHealthyDbInstances())[projectName];
     if (!db) {
         throw new Error(`Database for project ${projectName} is not available`);
     }
 
-    const doc = await retryDatabaseOperation(async () => {
-        return await db.collection('bids').doc(bidId).get();
-    }, 2, 1000, projectName);
+    const doc = await retryDatabaseOperation(
+        async () => {
+            return await db.collection('bids').doc(bidId).get();
+        },
+        2,
+        1000,
+        projectName,
+    );
 
     if (!doc.exists) {
         return null;
@@ -704,3 +827,4 @@ export async function getBidById(
 
     return { id: doc.id, ...doc.data() } as Bid;
 }
+
