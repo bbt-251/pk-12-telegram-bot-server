@@ -215,8 +215,8 @@ DB: ${projectName}
             await sendMessage(
                 chatId,
                 `❌ You already have an existing bid for this load request.\n\n` +
-                    `� You r Current Bid:\n` +
-                    `⚠️ Updating or re-submitting bids is not allowed. Each user can submit only one bid per shipment.`,
+                `� You r Current Bid:\n` +
+                `⚠️ Updating or re-submitting bids is not allowed. Each user can submit only one bid per shipment.`,
             );
             return;
         }
@@ -261,8 +261,8 @@ DB: ${projectName}
                         },
                     },
                 ],
-            ],
-        });
+                ],
+            });
 
         console.log(
             `✅ Sent bid Mini App link to transporter ${transporter.id} for load ${loadRequestId}`,
@@ -383,10 +383,10 @@ async function handleContactShare(chatId: number, contact: Contact): Promise<voi
                 await sendMessage(
                     chatId,
                     `✅ Phone verified successfully!\n\n` +
-                        `👤 Name: ${transporter.firstName} ${transporter.lastName}\n` +
-                        `📱 Phone: ${normalizedPhone}\n` +
-                        `🏢 Company: ${transporter.companyName || "N/A"}\n\n` +
-                        `You can now place bids on load requests.`,
+                    `👤 Name: ${transporter.firstName} ${transporter.lastName}\n` +
+                    `📱 Phone: ${normalizedPhone}\n` +
+                    `🏢 Company: ${transporter.companyName || "N/A"}\n\n` +
+                    `You can now place bids on load requests.`,
                     createAuthenticatedKeyboard(),
                 );
                 console.log(`Successfully linked transporter ${transporter.id} to chat ${chatId}`);
@@ -401,8 +401,8 @@ async function handleContactShare(chatId: number, contact: Contact): Promise<voi
             await sendMessage(
                 chatId,
                 "❌ Account not found.\n\n" +
-                    "Only transporters and brokers can use this bot. " +
-                    "Please ensure you are sharing the same phone number registered in the system, or contact your administrator for assistance.",
+                "Only transporters and brokers can use this bot. " +
+                "Please ensure you are sharing the same phone number registered in the system, or contact your administrator for assistance.",
                 { remove_keyboard: true },
             );
         }
