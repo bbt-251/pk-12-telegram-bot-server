@@ -1,16 +1,26 @@
 // Telegram Bot for Cargo Bidding System
-import TelegramBot from 'node-telegram-bot-api';
-import { handleCallbackQuery, setPendingBidWithExistingId, getCounterOfferStateByChatId } from './handlers/callback-handler';
-import { handleMessage, handleCounterOfferAmount } from './handlers/message-handler';
-import { getExistingBid, getLoadRequestById } from './services/bid-service';
-import { findTransporterByChatId, findUserByPhoneNumber, updateTransporterChatId } from './services/transporter-service';
-import { getExternalBidUrl } from './firebase-config';
-import { Contact, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove, TelegramMessage } from './types/telegram';
+import TelegramBot from "node-telegram-bot-api";
+import { handleCallbackQuery, getCounterOfferStateByChatId } from "./handlers/callback-handler";
+import { handleMessage, handleCounterOfferAmount } from "./handlers/message-handler";
+import { getExistingBid, getLoadRequestById } from "./services/bid-service";
+import {
+    findTransporterByChatId,
+    findUserByPhoneNumber,
+    updateTransporterChatId,
+} from "./services/transporter-service";
+import { getExternalBidUrl } from "./firebase-config";
+import {
+    Contact,
+    InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+    TelegramMessage,
+} from "./types/telegram";
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
 if (!BOT_TOKEN) {
-    throw new Error('TELEGRAM_BOT_TOKEN environment variable is required but not set');
+    throw new Error("TELEGRAM_BOT_TOKEN environment variable is required but not set");
 }
 
 // Create bot with polling configuration
@@ -19,16 +29,16 @@ const bot = new TelegramBot(BOT_TOKEN, {
         interval: 3000,
         autoStart: true,
         params: {
-            timeout: 10
-        }
-    }
+            timeout: 10,
+        },
+    },
 });
 
 // Handle all incoming messages
-bot.on('message', (msg: TelegramMessage) => {
+bot.on("message", (msg: TelegramMessage) => {
     const chatId = msg.chat.id;
-    const text = msg.text || '';
-    console.log('📨 Received message:', text, 'from chat:', chatId);
+    const text = msg.text || "";
+    console.log("📨 Received message:", text, "from chat:", chatId);
 
     // Handle contact sharing
     if (msg.contact) {
@@ -36,12 +46,12 @@ bot.on('message', (msg: TelegramMessage) => {
         handleContactShare(chatId, contact);
     }
     // Handle phone number as text
-    else if (text && (/^[+]?[0-9\s\-()]{10,15}$/).test(text)) {
-        const cleanPhone = text.replace(/[\s\-()]/g, '');
-        const normalizedPhone = cleanPhone.startsWith('+') ? cleanPhone : '+' + cleanPhone;
+    else if (text && /^[+]?[0-9\s\-()]{10,15}$/.test(text)) {
+        const cleanPhone = text.replace(/[\s\-()]/g, "");
+        const normalizedPhone = cleanPhone.startsWith("+") ? cleanPhone : "+" + cleanPhone;
         handleContactShare(chatId, {
             phone_number: normalizedPhone,
-            first_name: msg.from?.first_name || 'User'
+            first_name: msg.from?.first_name || "User",
         });
     }
     // Handle other text messages
@@ -57,7 +67,7 @@ bot.on('message', (msg: TelegramMessage) => {
 });
 
 // Handle callback queries (inline button clicks)
-bot.on('callback_query', async (query) => {
+bot.on("callback_query", async query => {
     const chatId = query.message?.chat.id;
     const callbackId = query.id;
     const data = query.data;
@@ -73,14 +83,14 @@ bot.on('callback_query', async (query) => {
 // Handle /start command with deep link support
 bot.onText(/\/start (.*)/, async (msg: TelegramMessage, match: RegExpExecArray | null) => {
     const chatId = msg.chat.id;
-    const payload = match && match[1] ? match[1].trim() : '';
+    const payload = match && match[1] ? match[1].trim() : "";
     console.log(`🔔 RECEIVED /start command from chat ${chatId} with payload: ${payload}`);
 
     // Check if this is a deep link for placing a bid
     // Format: bid_<projectId>_<loadRequestId> or bid_<loadRequestId> (backward compatibility)
-    if (payload.startsWith('bid_')) {
-        const value = payload.replace('bid_', '');
-        const parts = value.split('_');
+    if (payload.startsWith("bid_")) {
+        const value = payload.replace("bid_", "");
+        const parts = value.split("_");
 
         let projectName: string | undefined;
         let loadRequestId: string;
@@ -88,16 +98,18 @@ bot.onText(/\/start (.*)/, async (msg: TelegramMessage, match: RegExpExecArray |
         // Check if projectId is included (new format: bid_<projectId>_<loadRequestId>)
         // Project names from firebase-config: 'development', 'int'
         // We also support short names: 'dev' -> 'development', 'i' -> 'int'
-        const validProjects = ['development', 'int', 'dev', 'i'];
+        const validProjects = ["development", "int", "dev", "i"];
         if (parts.length >= 2 && parts[0] && validProjects.includes(parts[0])) {
             // Map short names to full names
             const projectNameMap: Record<string, string> = {
-                'dev': 'development',
-                'i': 'int'
+                dev: "development",
+                i: "int",
             };
             projectName = projectNameMap[parts[0]] || parts[0];
-            loadRequestId = parts.slice(1).join('_');
-            console.log(`📦 Deep link detected for project: ${projectName}, load request: ${loadRequestId}`);
+            loadRequestId = parts.slice(1).join("_");
+            console.log(
+                `📦 Deep link detected for project: ${projectName}, load request: ${loadRequestId}`,
+            );
         } else {
             // Backward compatibility: bid_<loadRequestId>
             loadRequestId = value;
@@ -124,13 +136,20 @@ bot.onText(/^\/start$/, (msg: TelegramMessage) => {
  * @param loadRequestId - The load request ID
  * @param projectNameOverride - Optional project name from deep link (if provided, uses this instead of transporter's project)
  */
-async function handleBidDeepLink(chatId: number, loadRequestId: string, projectNameOverride?: string): Promise<void> {
+async function handleBidDeepLink(
+    chatId: number,
+    loadRequestId: string,
+    projectNameOverride?: string,
+): Promise<void> {
     try {
         // Find transporter by chat ID
         const result = await findTransporterByChatId(chatId);
 
         if (!result) {
-            await sendMessage(chatId, '❌ You must be a registered transporter or broker to place bids. Please use /start to verify your phone number.');
+            await sendMessage(
+                chatId,
+                "❌ You must be a registered transporter or broker to place bids. Please use /start to verify your phone number.",
+            );
             return;
         }
 
@@ -139,12 +158,17 @@ async function handleBidDeepLink(chatId: number, loadRequestId: string, projectN
         // Use project from deep link if provided, otherwise use transporter's project
         const projectName = projectNameOverride || transporterProject;
 
-        console.log(`Handling bid deep link: transporter project=${transporterProject}, load request project=${projectName}`);
+        console.log(
+            `Handling bid deep link: transporter project=${transporterProject}, load request project=${projectName}`,
+        );
         console.log(`Looking for load request ${loadRequestId} in project ${projectName}`);
 
         // Check if transporter and load request are in the same project
         if (projectNameOverride && projectNameOverride !== transporterProject) {
-            await sendMessage(chatId, '❌ This load request is from a different project. Please use the correct bot for this load request.');
+            await sendMessage(
+                chatId,
+                "❌ This load request is from a different project. Please use the correct bot for this load request.",
+            );
             return;
         }
 
@@ -152,64 +176,48 @@ async function handleBidDeepLink(chatId: number, loadRequestId: string, projectN
         const loadRequest = await getLoadRequestById(loadRequestId, projectName);
 
         if (!loadRequest) {
-            console.log(`Load request ${loadRequestId} not found in project ${projectName}`)
-            await sendMessage(chatId, `❌ This load request no longer exists.
+            console.log(`Load request ${loadRequestId} not found in project ${projectName}`);
+            await sendMessage(
+                chatId,
+                `❌ This load request no longer exists.
 
 ---
 Debug:
 Load Request Data ID: ${loadRequestId}
 DB: ${projectName}
----`);
+---`,
+            );
             return;
         }
 
         // If load request has a projectId field, validate it matches
         if (loadRequest.projectId && loadRequest.projectId !== projectName) {
-            console.log(`Project mismatch: load request project=${loadRequest.projectId}, expected=${projectName}`)
-            await sendMessage(chatId, `❌ This load request is from a different project.\n\nYour account: ${projectName}\nLoad request: ${loadRequest.projectId}\n\nPlease use the correct bot for this load request.`);
+            console.log(
+                `Project mismatch: load request project=${loadRequest.projectId}, expected=${projectName}`,
+            );
+            await sendMessage(
+                chatId,
+                `❌ This load request is from a different project.\n\nYour account: ${projectName}\nLoad request: ${loadRequest.projectId}\n\nPlease use the correct bot for this load request.`,
+            );
             return;
         }
 
-        if (loadRequest.status !== 'Open') {
-            await sendMessage(chatId, '❌ This load request is no longer open for bidding.');
+        if (loadRequest.status !== "Open") {
+            await sendMessage(chatId, "❌ This load request is no longer open for bidding.");
             return;
         }
 
-        // Check if already bid and if it can be edited
+        // Check if user already has a bid for this load-request
         const existingBidResult = await getExistingBid(loadRequestId, transporter.uid, projectName);
 
         if (existingBidResult) {
-            const { bid, canEdit } = existingBidResult;
-
-            if (canEdit) {
-                // Allow editing existing bid
-                await sendMessage(
-                    chatId,
-                    `📝 You already have a bid on this load request.\n\n` +
-                    `Current bid: ETB ${bid.pricing.amount.toLocaleString()}\n` +
-                    `Trucks: ${bid.trucksProvided}\n\n` +
-                    `Please enter your new bid amount (ETB):`,
-                    {
-                        inline_keyboard: [
-                            [{ text: '❌ Cancel', callback_data: `cancel_bid_${loadRequestId}` }]
-                        ]
-                    }
-                );
-
-                // Store pending bid with existing bid ID for editing
-                setPendingBidWithExistingId(chatId, {
-                    loadRequestId,
-                    displayID: loadRequest.displayID,
-                    transporterId: transporter.id,
-                    transporterName: transporter.firstName,
-                    transporterPhone: transporter.phone,
-                    projectName,
-                    timestamp: Date.now()
-                }, bid.id);
-            } else {
-                // Bid is accepted, cannot edit
-                await sendMessage(chatId, '❌ Your bid on this load request has been accepted and cannot be modified.');
-            }
+            // Strictly enforce: one bid per user per load-request - no updates allowed
+            await sendMessage(
+                chatId,
+                `❌ You already have an existing bid for this load request.\n\n` +
+                    `� You r Current Bid:\n` +
+                    `⚠️ Updating or re-submitting bids is not allowed. Each user can submit only one bid per shipment.`,
+            );
             return;
         }
 
@@ -220,7 +228,10 @@ DB: ${projectName}
             const now = new Date();
 
             if (now > deadline) {
-                await sendMessage(chatId, `❌ The bidding deadline for this load request has passed.\n\nDeadline: ${deadline.toLocaleString()}`);
+                await sendMessage(
+                    chatId,
+                    `❌ The bidding deadline for this load request has passed.\n\nDeadline: ${deadline.toLocaleString()}`,
+                );
                 return;
             }
         }
@@ -235,21 +246,25 @@ DB: ${projectName}
 📅 Delivery: ${loadRequest.schedule.deliveryDate}
         `.trim();
 
-        await sendMessage(chatId, loadInfo,
-            {
-                inline_keyboard: [[
+        await sendMessage(chatId, loadInfo, {
+            inline_keyboard: [
+                [
                     {
-                        text: '💰 Click Here to Place a Bid',
-                        web_app: { url: getExternalBidUrl(loadRequestId, transporter.uid, projectName) }
-                    }
-                ]]
-            }
-        );
+                        text: "💰 Click Here to Place a Bid",
+                        web_app: {
+                            url: getExternalBidUrl(loadRequestId, transporter.uid, projectName),
+                        },
+                    },
+                ],
+            ],
+        });
 
-        console.log(`✅ Sent bid Mini App link to transporter ${transporter.id} for load ${loadRequestId}`);
+        console.log(
+            `✅ Sent bid Mini App link to transporter ${transporter.id} for load ${loadRequestId}`,
+        );
     } catch (error) {
-        console.error('Error handling bid deep link:', error);
-        await sendMessage(chatId, '❌ An error occurred. Please try again.');
+        console.error("Error handling bid deep link:", error);
+        await sendMessage(chatId, "❌ An error occurred. Please try again.");
     }
 }
 
@@ -274,31 +289,27 @@ Need help? Contact support.
     sendMessage(chatId, helpText);
 });
 
-console.log('🤖 Bot initialized successfully');
-console.log('🔧 Bot token is valid and working');
-console.log('🚀 Starting polling with node-telegram-bot-api...');
-console.log('✅ Polling started successfully');
-console.log('📡 Bot is now listening for messages...');
+console.log("🤖 Bot initialized successfully");
+console.log("🔧 Bot token is valid and working");
+console.log("🚀 Starting polling with node-telegram-bot-api...");
+console.log("✅ Polling started successfully");
+console.log("📡 Bot is now listening for messages...");
 
 // Keyboard markup for phone number request
 function createContactKeyboard() {
     return {
-        keyboard: [
-            [{ text: '📱 Share Phone Number', request_contact: true }]
-        ],
+        keyboard: [[{ text: "📱 Share Phone Number", request_contact: true }]],
         resize_keyboard: true,
-        one_time_keyboard: true
+        one_time_keyboard: true,
     };
 }
 
 // Keyboard markup for authenticated users with View My Bids button
 function createAuthenticatedKeyboard() {
     return {
-        keyboard: [
-            [{ text: '📋 View My Bids' }]
-        ],
+        keyboard: [[{ text: "📋 View My Bids" }]],
         resize_keyboard: true,
-        one_time_keyboard: false
+        one_time_keyboard: false,
     };
 }
 
@@ -306,10 +317,13 @@ function createAuthenticatedKeyboard() {
 export async function sendMessage(
     chatId: number,
     text: string,
-    keyboard?: InlineKeyboardMarkup | ReplyKeyboardMarkup | ReplyKeyboardRemove
+    keyboard?: InlineKeyboardMarkup | ReplyKeyboardMarkup | ReplyKeyboardRemove,
 ): Promise<TelegramBot.Message> {
-    const messageText = text && text.trim() ? text : '.';
-    const options: { parse_mode: 'HTML'; reply_markup?: InlineKeyboardMarkup | ReplyKeyboardMarkup | ReplyKeyboardRemove } = { parse_mode: 'HTML' };
+    const messageText = text && text.trim() ? text : ".";
+    const options: {
+        parse_mode: "HTML";
+        reply_markup?: InlineKeyboardMarkup | ReplyKeyboardMarkup | ReplyKeyboardRemove;
+    } = { parse_mode: "HTML" };
     if (keyboard) {
         options.reply_markup = keyboard;
     }
@@ -318,7 +332,9 @@ export async function sendMessage(
 
 // Remove keyboard
 export async function removeKeyboard(chatId: number): Promise<TelegramBot.Message> {
-    return bot.sendMessage(chatId, '.', { reply_markup: { remove_keyboard: true } });
+    return bot.sendMessage(chatId, ".", {
+        reply_markup: { remove_keyboard: true },
+    });
 }
 
 // Send contact request message
@@ -326,8 +342,8 @@ async function sendContactRequest(chatId: number): Promise<TelegramBot.Message> 
     const keyboard = createContactKeyboard();
     return sendMessage(
         chatId,
-        '👋 Welcome to Cargo Bidding Bot!\n\nTo place bids on load requests, please share your phone number so we can verify your transporter or broker account.',
-        keyboard
+        "👋 Welcome to Cargo Bidding Bot!\n\nTo place bids on load requests, please share your phone number so we can verify your transporter or broker account.",
+        keyboard,
     );
 }
 
@@ -335,14 +351,14 @@ async function sendContactRequest(chatId: number): Promise<TelegramBot.Message> 
 async function handleContactShare(chatId: number, contact: Contact): Promise<void> {
     const phoneNumber = contact.phone_number;
     // Normalize phone number
-    const cleanPhone = phoneNumber.replace(/[\s\-()]/g, '');
-    const normalizedPhone = cleanPhone.startsWith('+') ? cleanPhone : '+' + cleanPhone;
+    const cleanPhone = phoneNumber.replace(/[\s\-()]/g, "");
+    const normalizedPhone = cleanPhone.startsWith("+") ? cleanPhone : "+" + cleanPhone;
 
     console.log(`Processing contact share for chat ${chatId}, phone: ${normalizedPhone}`);
 
     try {
         // Send initial verification message
-        await sendMessage(chatId, '⏳ Please wait while we verify your phone number...');
+        await sendMessage(chatId, "⏳ Please wait while we verify your phone number...");
 
         // Search for transporter/broker across all Firebase projects
         const result = await findUserByPhoneNumber(normalizedPhone);
@@ -351,42 +367,50 @@ async function handleContactShare(chatId: number, contact: Contact): Promise<voi
             const { transporter, projectName } = result;
 
             // Update transporter's telegramChatID
-            const updateSuccess = await updateTransporterChatId(transporter.id, chatId, projectName);
+            const updateSuccess = await updateTransporterChatId(
+                transporter.id,
+                chatId,
+                projectName,
+            );
 
             if (updateSuccess) {
                 // Send success message with authenticated keyboard
                 await sendMessage(
                     chatId,
                     `✅ Phone verified successfully!\n\n` +
-                    `👤 Name: ${transporter.firstName} ${transporter.lastName}\n` +
-                    `📱 Phone: ${normalizedPhone}\n` +
-                    `🏢 Company: ${transporter.companyName || 'N/A'}\n\n` +
-                    `You can now place bids on load requests.`,
-                    createAuthenticatedKeyboard()
+                        `👤 Name: ${transporter.firstName} ${transporter.lastName}\n` +
+                        `📱 Phone: ${normalizedPhone}\n` +
+                        `🏢 Company: ${transporter.companyName || "N/A"}\n\n` +
+                        `You can now place bids on load requests.`,
+                    createAuthenticatedKeyboard(),
                 );
                 console.log(`Successfully linked transporter ${transporter.id} to chat ${chatId}`);
             } else {
-                await sendMessage(chatId, '❌ Failed to link your account. Please try again or contact support.');
+                await sendMessage(
+                    chatId,
+                    "❌ Failed to link your account. Please try again or contact support.",
+                );
             }
         } else {
             // User not found or not a transporter/broker
             await sendMessage(
                 chatId,
-                '❌ Account not found.\n\n' +
-                'Only transporters and brokers can use this bot. ' +
-                'Please ensure you are sharing the same phone number registered in the system, or contact your administrator for assistance.',
-                { remove_keyboard: true }
+                "❌ Account not found.\n\n" +
+                    "Only transporters and brokers can use this bot. " +
+                    "Please ensure you are sharing the same phone number registered in the system, or contact your administrator for assistance.",
+                { remove_keyboard: true },
             );
         }
     } catch (error) {
-        console.error('Error processing contact:', error);
+        console.error("Error processing contact:", error);
         await sendMessage(
             chatId,
-            '❌ An error occurred while processing your request. Please try again later.',
-            { remove_keyboard: true }
+            "❌ An error occurred while processing your request. Please try again later.",
+            { remove_keyboard: true },
         );
     }
 }
 
 // Export bot instance for use in other modules
 export { bot };
+
