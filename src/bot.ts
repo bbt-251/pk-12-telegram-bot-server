@@ -211,12 +211,27 @@ DB: ${projectName}
         const existingBidResult = await getExistingBid(loadRequestId, transporter.uid, projectName);
 
         if (existingBidResult) {
-            // Strictly enforce: one bid per user per load-request - no updates allowed
+            // User already has a bid - open Mini App to view existing bid details
             await sendMessage(
                 chatId,
-                `❌ You already have an existing bid for this load request.\n\n` +
-                    `� You r Current Bid:\n` +
-                    `⚠️ Updating or re-submitting bids is not allowed. Each user can submit only one bid per shipment.`,
+                `📋 You already have an existing bid for this load request.\n\n` +
+                    `Click the button below to view your bid details.`,
+                {
+                    inline_keyboard: [
+                        [
+                            {
+                                text: "👁️ View My Bid",
+                                web_app: {
+                                    url: getExternalBidUrl(
+                                        loadRequestId,
+                                        transporter.uid,
+                                        projectName,
+                                    ),
+                                },
+                            },
+                        ],
+                    ],
+                },
             );
             return;
         }
