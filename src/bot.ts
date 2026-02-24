@@ -211,12 +211,27 @@ DB: ${projectName}
         const existingBidResult = await getExistingBid(loadRequestId, transporter.uid, projectName);
 
         if (existingBidResult) {
-            // Strictly enforce: one bid per user per load-request - no updates allowed
+            // User already has a bid - open Mini App to view existing bid details
             await sendMessage(
                 chatId,
-                `❌ You already have an existing bid for this load request.\n\n` +
-                `� You r Current Bid:\n` +
-                `⚠️ Updating or re-submitting bids is not allowed. Each user can submit only one bid per shipment.`,
+                `📋 You already have an existing bid for this load request.\n\n` +
+                    `Click the button below to view your bid details.`,
+                {
+                    inline_keyboard: [
+                        [
+                            {
+                                text: "👁️ View My Bid",
+                                web_app: {
+                                    url: getExternalBidUrl(
+                                        loadRequestId,
+                                        transporter.uid,
+                                        projectName,
+                                    ),
+                                },
+                            },
+                        ],
+                    ],
+                },
             );
             return;
         }
@@ -248,12 +263,15 @@ DB: ${projectName}
 
         // send url directly on dev
         if (process.env.NODE_ENV === "development") {
-            await sendMessage(chatId, `url: ${getExternalBidUrl(loadRequestId, transporter.uid, projectName)}`)
+            await sendMessage(
+                chatId,
+                `url: ${getExternalBidUrl(loadRequestId, transporter.uid, projectName)}`,
+            );
         }
 
-        await sendMessage(chatId, loadInfo,
-            {
-                inline_keyboard: [[
+        await sendMessage(chatId, loadInfo, {
+            inline_keyboard: [
+                [
                     {
                         text: "💰 Click Here to Place a Bid",
                         web_app: {
@@ -261,8 +279,8 @@ DB: ${projectName}
                         },
                     },
                 ],
-                ],
-            });
+            ],
+        });
 
         console.log(
             `✅ Sent bid Mini App link to transporter ${transporter.id} for load ${loadRequestId}`,
@@ -383,10 +401,10 @@ async function handleContactShare(chatId: number, contact: Contact): Promise<voi
                 await sendMessage(
                     chatId,
                     `✅ Phone verified successfully!\n\n` +
-                    `👤 Name: ${transporter.firstName} ${transporter.lastName}\n` +
-                    `📱 Phone: ${normalizedPhone}\n` +
-                    `🏢 Company: ${transporter.companyName || "N/A"}\n\n` +
-                    `You can now place bids on load requests.`,
+                        `👤 Name: ${transporter.firstName} ${transporter.lastName}\n` +
+                        `📱 Phone: ${normalizedPhone}\n` +
+                        `🏢 Company: ${transporter.companyName || "N/A"}\n\n` +
+                        `You can now place bids on load requests.`,
                     createAuthenticatedKeyboard(),
                 );
                 console.log(`Successfully linked transporter ${transporter.id} to chat ${chatId}`);
@@ -401,8 +419,8 @@ async function handleContactShare(chatId: number, contact: Contact): Promise<voi
             await sendMessage(
                 chatId,
                 "❌ Account not found.\n\n" +
-                "Only transporters and brokers can use this bot. " +
-                "Please ensure you are sharing the same phone number registered in the system, or contact your administrator for assistance.",
+                    "Only transporters and brokers can use this bot. " +
+                    "Please ensure you are sharing the same phone number registered in the system, or contact your administrator for assistance.",
                 { remove_keyboard: true },
             );
         }
