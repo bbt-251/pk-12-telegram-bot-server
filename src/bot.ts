@@ -261,6 +261,14 @@ DB: ${projectName}
 📅 Delivery: ${loadRequest.schedule.deliveryDate}
         `.trim();
 
+        // send url directly on dev
+        if (process.env.NODE_ENV === "development") {
+            await sendMessage(
+                chatId,
+                `url: ${getExternalBidUrl(loadRequestId, transporter.uid, projectName)}`,
+            );
+        }
+
         await sendMessage(chatId, loadInfo, {
             inline_keyboard: [
                 [
