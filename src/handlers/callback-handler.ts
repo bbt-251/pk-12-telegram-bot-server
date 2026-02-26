@@ -36,6 +36,7 @@ export interface CounterOfferState {
     projectName: string;
     loadRequestDisplayID: string;
     counterAmount: number;
+    trucks: number;
     originalBidAmount: number;
     timestamp: number;
 }
@@ -508,43 +509,19 @@ async function handleAcceptCounterCallback(
         if (updatedBid) {
             await bot.answerCallbackQuery(callbackId);
 
-            // Get load request to use display ID and check status
+            // Get load request to use display ID
             const loadRequest = await getLoadRequestById(bid.loadRequestID, projectName);
 
-            // Only show Share Transport Details button if load request is not Confirmed
-            if (loadRequest?.status !== "Confirmed") {
-                const externalUrl = getExternalTransportDetailsUrl(
-                    bid.id,
-                    transporter.uid,
-                    projectName,
-                );
-                await sendMessage(
-                    userChatId,
-                    `✅ Counter-offer accepted!\n\n` +
-                        `📦 Load Request: #${loadRequest?.displayID || bid.loadRequestID}\n` +
-                        `💰 Final Bid Amount: ETB ${updatedBid.pricing.amount.toLocaleString()}\n\n` +
-                        `The cargo owner has been notified. You can now share transport details.`,
-                    {
-                        inline_keyboard: [
-                            [
-                                {
-                                    text: "📋 Share Transport Details",
-                                    web_app: { url: externalUrl },
-                                },
-                            ],
-                        ],
-                    },
-                );
-            } else {
-                await sendMessage(
-                    userChatId,
-                    `✅ Counter-offer accepted!\n\n` +
-                        `📦 Load Request: #${loadRequest?.displayID || bid.loadRequestID}\n` +
-                        `💰 Final Bid Amount: ETB ${updatedBid.pricing.amount.toLocaleString()}\n\n` +
-                        `The cargo owner has been notified.`,
-                );
-            }
-            console.log(`✅ Transporter ${transporter.id} accepted counter offer for bid ${bidId}`);
+            // Send confirmation - negotiation is complete, waiting for cargo owner to allocate trucks
+            await sendMessage(
+                userChatId,
+                `✅ Counter-offer accepted!\n\n` +
+                    `📦 Load Request: #${loadRequest?.displayID || bid.loadRequestID}\n` +
+                    `💰 Agreed Amount: ETB ${updatedBid.pricing.amount.toLocaleString()}\n` +
+                    `🚛 Trucks: ${updatedBid.trucksProvided}\n\n` +
+                    `The negotiation is complete. The cargo owner will review and allocate trucks. You will receive a notification with transport details submission deadline once they confirm.`,
+            );
+            console.log(`✅ Transporter ${transporter.id} accepted counter offer for bid ${bidId} - negotiation complete`);
         } else {
             await bot.answerCallbackQuery(callbackId, {
                 text: "❌ Failed to accept counter offer. Please try again.",
@@ -617,8 +594,10 @@ async function handleCounterOfferCallback(
             bidId,
             transporterId: transporter.id,
             projectName,
+
             loadRequestDisplayID: displayID,
             counterAmount: 0,
+            trucks: 0,
             originalBidAmount: bid.pricing.amount,
             timestamp: Date.now(),
         });
@@ -688,6 +667,7 @@ async function handleConfirmCounterOfferCallback(
             state.counterAmount,
             `${transporter.firstName} ${transporter.lastName || ""}`.trim(),
             projectName,
+            state.trucks,
         );
 
         if (updatedBid) {

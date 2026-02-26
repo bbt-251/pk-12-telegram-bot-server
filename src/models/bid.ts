@@ -23,8 +23,9 @@ export interface BidPricing {
 export interface OfferHistory {
     id: string;
     amount: number;
+    trucks: number;
     currency: string;
-    type: 'initial' | 'counter_offer' | 'transporter_counter' | "offer_accepted";
+    status: "pending" | "accepted" | "rejected";
     offeredBy: 'transporter' | 'cargo_owner';
     offeredByName: string;
     timestamp: string;

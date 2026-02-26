@@ -55,7 +55,8 @@ export async function createBid(
                 id: crypto.randomUUID(),
                 amount: bidAmount,
                 currency: 'ETB',
-                type: 'initial',
+                status: 'pending',
+                trucks: numberOfTrucks,
                 offeredBy: 'transporter',
                 offeredByName: transporterName,
                 timestamp: now,
@@ -673,7 +674,8 @@ ${lowestBidDisplay}
 }
 
 /**
- * Accept a counter offer - updates bid status to Accepted
+ * Accept a counter offer - only updates offerHistory, does NOT change bid status to Accepted
+ * The bid status will be changed to Accepted later when cargo owner allocates trucks
  */
 export async function acceptCounterOffer(bidId: string, projectName: string): Promise<Bid | null> {
     const db = (await getHealthyDbInstances())[projectName];
@@ -696,13 +698,34 @@ export async function acceptCounterOffer(bidId: string, projectName: string): Pr
         return null;
     }
 
-    // Update bid status to Accepted
+    const existingBid = { id: doc.id, ...doc.data() } as Bid;
+
+    // Find the latest cargo owner counter-offer and mark it as accepted
+    const updatedHistory = existingBid.offerHistory.map((offer, index) => {
+        // Mark the last pending cargo owner offer as accepted
+        if (
+            offer.offeredBy === 'cargo_owner' &&
+            offer.status === 'pending' &&
+            index === existingBid.offerHistory.length - 1
+        ) {
+            return { ...offer, status: 'accepted' as const };
+        }
+        return offer;
+    });
+
+    // Get the accepted offer to update pricing (for display purposes)
+    const acceptedOffer = updatedHistory[updatedHistory.length - 1];
+    const finalAmount = acceptedOffer?.amount || existingBid.pricing.amount;
+    const finalTrucks = acceptedOffer?.trucks || existingBid.trucksProvided;
+
+    // Update ONLY the offerHistory and pricing - DO NOT change bid status to Accepted
+    // The cargo owner will change status to Accepted when they allocate trucks
     await retryDatabaseOperation(
         async () => {
             await docRef.update({
-                status: BidStatus.ACCEPTED,
-                isAccepted: true,
-                isWinner: true,
+                'pricing.amount': finalAmount,
+                trucksProvided: finalTrucks,
+                offerHistory: updatedHistory,
                 updatedAt: admin.firestore.Timestamp.now(),
             });
         },
@@ -711,7 +734,7 @@ export async function acceptCounterOffer(bidId: string, projectName: string): Pr
         projectName,
     );
 
-    console.log(`✅ Counter offer accepted for bid ${bidId}`);
+    console.log(`✅ Counter offer accepted in offerHistory for bid ${bidId} - waiting for cargo owner to allocate trucks`);
 
     // Return updated bid
     const updatedDoc = await retryDatabaseOperation(
@@ -734,6 +757,7 @@ export async function transporterCounterOffer(
     amount: number,
     transporterName: string,
     projectName: string,
+    trucksToAllocate: number,
 ): Promise<Bid | null> {
     const db = (await getHealthyDbInstances())[projectName];
     if (!db) {
@@ -764,7 +788,8 @@ export async function transporterCounterOffer(
         id: crypto.randomUUID(),
         amount,
         currency: existingBid.pricing.currency,
-        type: 'transporter_counter',
+        status: 'pending',
+        trucks: trucksToAllocate,
         offeredBy: 'transporter',
         offeredByName: transporterName,
         timestamp: now,
@@ -775,8 +800,9 @@ export async function transporterCounterOffer(
     await retryDatabaseOperation(
         async () => {
             await docRef.update({
-                status: BidStatus.COUNTER_OFFER as BidStatus,
+                status: BidStatus.PENDING as BidStatus,
                 'pricing.amount': amount,
+                trucksProvided: trucksToAllocate,
                 offerHistory: updatedHistory,
                 updatedAt: admin.firestore.Timestamp.now(),
             });
@@ -787,7 +813,7 @@ export async function transporterCounterOffer(
     );
 
     console.log(
-        `✅ Transporter counter offer added for bid ${bidId}: ETB ${amount.toLocaleString()}`,
+        `✅ Transporter counter offer added for bid ${bidId}: ETB ${amount.toLocaleString()} with ${trucksToAllocate} trucks - status set to Pending`,
     );
 
     // Return updated bid
