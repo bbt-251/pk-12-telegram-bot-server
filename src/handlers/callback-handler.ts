@@ -38,6 +38,7 @@ export interface CounterOfferState {
     counterAmount: number;
     trucks: number;
     originalBidAmount: number;
+    cargoOwnerOfferAmount: number; // The cargo owner's counter offer amount
     timestamp: number;
 }
 
@@ -599,16 +600,24 @@ async function handleCounterOfferCallback(
         const loadRequest = await getLoadRequestById(bid.loadRequestID, projectName);
         const displayID = loadRequest?.displayID || bid.loadRequestID;
 
+        // Get the latest counter offer from cargo owner (most recent offer in history)
+        const latestCargoOwnerOffer = bid.offerHistory
+            ?.filter(offer => offer.offeredBy === 'cargo_owner')
+            ?.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+
+        const counterOfferAmount = latestCargoOwnerOffer?.amount || bid.pricing.amount;
+        const counterOfferTrucks = latestCargoOwnerOffer?.trucks || bid.trucksProvided;
+
         // Store counter offer state for this user with correct display ID
         counterOfferStates.set(userChatId, {
             bidId,
             transporterId: transporter.id,
             projectName,
-
             loadRequestDisplayID: displayID,
             counterAmount: 0,
             trucks: 0,
             originalBidAmount: bid.pricing.amount,
+            cargoOwnerOfferAmount: counterOfferAmount, // Store cargo owner's offer
             timestamp: Date.now(),
         });
 
@@ -616,15 +625,19 @@ async function handleCounterOfferCallback(
         await bot.answerCallbackQuery(callbackId);
 
         // Send message asking for counter offer amount
-        await sendMessage(
-            userChatId,
-            `💰 Enter your counter-offer amount:\n\n` +
-                `📦 Load Request: #${displayID}\n` +
-                `💰 Current Offer: ETB ${bid.pricing.amount.toLocaleString()}\n\n` +
-                `Please enter your counter-offer amount (ETB):`,
-        );
+        const trucksLine = counterOfferTrucks ? `🚛 *Trucks:* ${counterOfferTrucks}\n` : "";
+        const message = `
+🔄 *Counter Offer*
 
-        console.log(`✅ Started counter offer flow for bid ${bidId}`);
+📦 *Load Request:* ${displayID}
+
+💰 *Counter Offer:* ETB ${counterOfferAmount.toLocaleString()}
+💰 *Your Original Bid:* ETB ${bid.pricing.amount.toLocaleString()}
+${trucksLine}
+👇 *Please enter your counter-offer amount (ETB):*
+        `.trim();
+
+        await sendMessage(userChatId, message);
 
         console.log(`✅ Started counter offer flow for bid ${bidId}`);
     } catch (error) {
