@@ -9,6 +9,15 @@ export enum BidStatus {
     EXPIRED = "Expired",
 }
 
+export enum PackageBidStatus {
+    PENDING = 'Pending',
+    ACCEPTED = 'Accepted',
+    REJECTED = 'Rejected',
+    CO_OFFER = 'Cargo Owner Counter Offer',
+    TRANS_COUNTER = 'Transporter Counter Offer',
+    TRANSPORT_SHARED = 'Transport Details Shared',
+}
+
 export interface BidPricing {
     amount: number;
     currency: string;
@@ -30,6 +39,38 @@ export interface OfferHistory {
     offeredByName: string;
     timestamp: string;
     notes?: string;
+    deadline?: string; // ISO 8601 date string for response deadline
+}
+
+export interface PackageBid {
+    packageGroupId: string;
+    packageGroupData: {
+        id: string;
+        packagingType: string;
+        numberOfTrucks: string;
+    };
+    packageItemId: string;
+    packageItemData: {
+        id: string;
+        length: string;
+        width: string;
+        height: string;
+        weight: string;
+        quantity: number;
+        containerSize?: string;
+        containerType?: string;
+        containerNumber?: string;
+        containerVariant?: string;
+    };
+    bidAmount: number;
+    trucksProvided: number;
+    trucksAllocated?: number;
+    status?: PackageBidStatus;
+    transportDetailDeadline?: string;
+    extensionRequested?: boolean;
+    extensionRequestedAt?: string;
+    extensionStatus?: 'pending' | 'approved' | 'rejected';
+    extendedDeadline?: string;
 }
 
 export interface BidTruckDetails {
@@ -64,6 +105,7 @@ export interface Bid {
     driverDetails?: BidDriverDetails;
     notes?: string;
     validUntil?: firestore.Timestamp;
+    packageBids?: PackageBid[]; // Per-package bids (new for package-level bidding)
     offerHistory: OfferHistory[]; // History of all offers and counter-offers
     createdAt: firestore.Timestamp;
     updatedAt: firestore.Timestamp;

@@ -530,10 +530,20 @@ async function handleAcceptCounterCallback(
         }
     } catch (error) {
         console.error("Error accepting counter offer:", error);
-        await bot.answerCallbackQuery(callbackId, {
-            text: "❌ An error occurred. Please try again.",
-            show_alert: true,
-        });
+        
+        // Check if error is about expired deadline
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage.includes('expired') || errorMessage.includes('deadline')) {
+            await bot.answerCallbackQuery(callbackId, {
+                text: "⏰ This counter-offer has expired. The deadline has passed.",
+                show_alert: true,
+            });
+        } else {
+            await bot.answerCallbackQuery(callbackId, {
+                text: "❌ An error occurred. Please try again.",
+                show_alert: true,
+            });
+        }
     }
 }
 

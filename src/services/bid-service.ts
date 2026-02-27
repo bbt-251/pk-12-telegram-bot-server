@@ -700,6 +700,23 @@ export async function acceptCounterOffer(bidId: string, projectName: string): Pr
 
     const existingBid = { id: doc.id, ...doc.data() } as Bid;
 
+    // Find the latest cargo owner counter-offer
+    const latestCargoOwnerOffer = existingBid.offerHistory
+        .slice()
+        .reverse()
+        .find(offer => offer.offeredBy === 'cargo_owner' && offer.status === 'pending');
+
+    // Check if the counter-offer has expired
+    if (latestCargoOwnerOffer?.deadline) {
+        const deadlineDate = new Date(latestCargoOwnerOffer.deadline);
+        const now = new Date();
+        
+        if (now > deadlineDate) {
+            console.log(`❌ Counter-offer for bid ${bidId} has expired. Deadline was ${latestCargoOwnerOffer.deadline}`);
+            throw new Error('Counter-offer has expired. The deadline has passed.');
+        }
+    }
+
     // Find the latest cargo owner counter-offer and mark it as accepted
     const updatedHistory = existingBid.offerHistory.map((offer, index) => {
         // Mark the last pending cargo owner offer as accepted
@@ -713,21 +730,34 @@ export async function acceptCounterOffer(bidId: string, projectName: string): Pr
         return offer;
     });
 
-    // Get the accepted offer to update pricing (for display purposes)
+    // Get the accepted offer to update package-level bids
     const acceptedOffer = updatedHistory[updatedHistory.length - 1];
     const finalAmount = acceptedOffer?.amount || existingBid.pricing.amount;
     const finalTrucks = acceptedOffer?.trucks || existingBid.trucksProvided;
 
-    // Update ONLY the offerHistory and pricing - DO NOT change bid status to Accepted
+    // Prepare update data - only update offerHistory
+    const updateData: Record<string, unknown> = {
+        offerHistory: updatedHistory,
+        updatedAt: admin.firestore.Timestamp.now(),
+    };
+
+    // If this bid has packageBids, update their amounts and trucks
+    // This is where the negotiated values are stored for package-level bids
+    // Do NOT update bid-level pricing.amount and trucksProvided
+    if (existingBid.packageBids && existingBid.packageBids.length > 0) {
+        const updatedPackageBids = existingBid.packageBids.map(pkgBid => ({
+            ...pkgBid,
+            bidAmount: finalAmount,
+            trucksProvided: finalTrucks,
+        }));
+        updateData.packageBids = updatedPackageBids;
+    }
+
+    // Update ONLY the offerHistory and packageBids - DO NOT change bid status to Accepted
     // The cargo owner will change status to Accepted when they allocate trucks
     await retryDatabaseOperation(
         async () => {
-            await docRef.update({
-                'pricing.amount': finalAmount,
-                trucksProvided: finalTrucks,
-                offerHistory: updatedHistory,
-                updatedAt: admin.firestore.Timestamp.now(),
-            });
+            await docRef.update(updateData);
         },
         2,
         1000,
@@ -797,15 +827,28 @@ export async function transporterCounterOffer(
 
     const updatedHistory = [...(existingBid.offerHistory || []), counterOffer];
 
+    // Prepare update data - only update offerHistory and status
+    const updateData: Record<string, unknown> = {
+        status: BidStatus.PENDING as BidStatus,
+        offerHistory: updatedHistory,
+        updatedAt: admin.firestore.Timestamp.now(),
+    };
+
+    // If this bid has packageBids, update their amounts and trucks
+    // This is where the negotiated values are stored for package-level bids
+    // Do NOT update bid-level pricing.amount and trucksProvided
+    if (existingBid.packageBids && existingBid.packageBids.length > 0) {
+        const updatedPackageBids = existingBid.packageBids.map(pkgBid => ({
+            ...pkgBid,
+            bidAmount: amount,
+            trucksProvided: trucksToAllocate,
+        }));
+        updateData.packageBids = updatedPackageBids;
+    }
+
     await retryDatabaseOperation(
         async () => {
-            await docRef.update({
-                status: BidStatus.PENDING as BidStatus,
-                'pricing.amount': amount,
-                trucksProvided: trucksToAllocate,
-                offerHistory: updatedHistory,
-                updatedAt: admin.firestore.Timestamp.now(),
-            });
+            await docRef.update(updateData);
         },
         2,
         1000,
