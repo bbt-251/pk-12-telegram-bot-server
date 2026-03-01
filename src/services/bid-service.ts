@@ -3,7 +3,7 @@ import {
     retryDatabaseOperation,
     getExternalBidUrl,
 } from '../firebase-config';
-import { Bid, BidStatus, OfferHistory } from '../models/bid';
+import { Bid, BidStatus, OfferHistory, PackageBid, PackageBidStatus } from '../models/bid';
 import { LoadRequest, LowestBidInfo } from '../models/load-request';
 import admin from 'firebase-admin';
 
@@ -35,6 +35,54 @@ export async function createBid(
     const bidRef = db.collection('bids').doc();
     const bidId = bidRef.id;
 
+    // Fetch the load request to initialize packageBids
+    const loadRequest = await getLoadRequestById(actualLoadRequestId, projectName);
+
+    const initialOffer: OfferHistory = {
+        id: `offer-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        amount: bidAmount,
+        currency: 'ETB',
+        status: 'pending',
+        trucks: numberOfTrucks,
+        offeredBy: 'transporter',
+        offeredByName: transporterName,
+        timestamp: now,
+    };
+
+    // Initialize packageBids from loadRequest
+    const packageBids: PackageBid[] = [];
+    if (loadRequest?.cargo?.packageGroups) {
+        loadRequest.cargo.packageGroups.forEach((group: any) => {
+            group.packages.forEach((pkg: any) => {
+                packageBids.push({
+                    packageGroupId: group.id,
+                    packageGroupData: {
+                        id: group.id,
+                        packagingType: group.packagingType,
+                        numberOfTrucks: group.numberOfTrucks || '1',
+                    },
+                    packageItemId: pkg.id,
+                    packageItemData: {
+                        id: pkg.id,
+                        length: pkg.length,
+                        width: pkg.width,
+                        height: pkg.height,
+                        weight: pkg.weight,
+                        quantity: pkg.quantity,
+                        containerSize: pkg.containerSize,
+                        containerType: pkg.containerType,
+                        containerNumber: pkg.containerNumber,
+                        containerVariant: pkg.containerVariant,
+                    },
+                    bidAmount: bidAmount,
+                    trucksProvided: numberOfTrucks,
+                    status: PackageBidStatus.PENDING,
+                    offerHistory: [initialOffer],
+                } as PackageBid);
+            });
+        });
+    }
+
     const bid: Bid = {
         id: bidId,
         loadRequestID: actualLoadRequestId,
@@ -50,18 +98,8 @@ export async function createBid(
         status: BidStatus.PENDING,
         isWinner: false,
         isAccepted: false,
-        offerHistory: [
-            {
-                id: crypto.randomUUID(),
-                amount: bidAmount,
-                currency: 'ETB',
-                status: 'pending',
-                trucks: numberOfTrucks,
-                offeredBy: 'transporter',
-                offeredByName: transporterName,
-                timestamp: now,
-            },
-        ],
+        ...(packageBids.length > 0 ? { packageBids } : {}),
+        offerHistory: [initialOffer],
         createdAt: admin.firestore.Timestamp.fromDate(new Date(now)),
         updatedAt: admin.firestore.Timestamp.fromDate(new Date(now)),
     };
@@ -186,32 +224,56 @@ export async function updateBid(
         throw new Error(`Database for project ${projectName} is not available`);
     }
 
+    const docRef = db.collection('bids').doc(bidId);
+    const bidDoc = await docRef.get();
+    if (!bidDoc.exists) {
+        throw new Error('Bid not found');
+    }
+    const existingBid = { id: bidDoc.id, ...bidDoc.data() } as Bid;
+
     const now = new Date().toISOString();
-    const updateData: Record<string, unknown> = {
+    const updateData: any = {
         updatedAt: admin.firestore.Timestamp.fromDate(new Date(now)),
+    };
+
+    const newBidAmount = updates.bidAmount ?? existingBid.pricing.amount;
+    const newTrucks = updates.numberOfTrucks ?? existingBid.trucksProvided;
+
+    const initialOffer: OfferHistory = {
+        id: `offer-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        amount: newBidAmount,
+        currency: existingBid.pricing.currency,
+        status: 'pending',
+        trucks: newTrucks,
+        offeredBy: 'transporter',
+        offeredByName: 'Transporter',
+        timestamp: now,
     };
 
     if (updates.bidAmount !== undefined) {
         updateData['pricing.amount'] = updates.bidAmount;
-        // Add to offer history
-        updateData['offerHistory'] = admin.firestore.FieldValue.arrayUnion({
-            id: crypto.randomUUID(),
-            amount: updates.bidAmount,
-            currency: 'ETB',
-            type: 'initial',
-            offeredBy: 'transporter',
-            offeredByName: 'Transporter',
-            timestamp: now,
-        });
     }
 
     if (updates.numberOfTrucks !== undefined) {
         updateData['trucksProvided'] = updates.numberOfTrucks;
     }
 
+    // Mirror updates in packageBids if they exist
+    if (existingBid.packageBids && existingBid.packageBids.length > 0) {
+        updateData.packageBids = existingBid.packageBids.map(pkgBid => ({
+            ...pkgBid,
+            bidAmount: updates.bidAmount ?? pkgBid.bidAmount,
+            trucksProvided: updates.numberOfTrucks ?? pkgBid.trucksProvided,
+            offerHistory: [...(pkgBid.offerHistory || []), initialOffer],
+        }));
+    }
+
+    // Still update top-level offerHistory for now
+    updateData.offerHistory = admin.firestore.FieldValue.arrayUnion(initialOffer);
+
     await retryDatabaseOperation(
         async () => {
-            await db.collection('bids').doc(bidId).update(updateData);
+            await docRef.update(updateData);
         },
         2,
         1000,
@@ -636,10 +698,10 @@ async function formatLoadRequestMessageWithLowestBid(
         minBudget !== 'N/A' && maxBudget !== 'N/A'
             ? `${minBudget} – ${maxBudget}`
             : minBudget !== 'N/A'
-              ? minBudget
-              : maxBudget !== 'N/A'
-                ? maxBudget
-                : 'N/A';
+                ? minBudget
+                : maxBudget !== 'N/A'
+                    ? maxBudget
+                    : 'N/A';
 
     // Format lowest bid
     const lowestBidDisplay = lowestBid
@@ -700,8 +762,13 @@ export async function acceptCounterOffer(bidId: string, projectName: string): Pr
 
     const existingBid = { id: doc.id, ...doc.data() } as Bid;
 
+    // Use the first package's history as the master if top-level is empty or missing
+    // In our new model, we should probably prefer packageBids[0].offerHistory
+    const masterHistory = (existingBid.packageBids && existingBid.packageBids[0]?.offerHistory)
+        || existingBid.offerHistory || [];
+
     // Find the latest cargo owner counter-offer
-    const latestCargoOwnerOffer = existingBid.offerHistory
+    const latestCargoOwnerOffer = masterHistory
         .slice()
         .reverse()
         .find(offer => offer.offeredBy === 'cargo_owner' && offer.status === 'pending');
@@ -710,51 +777,62 @@ export async function acceptCounterOffer(bidId: string, projectName: string): Pr
     if (latestCargoOwnerOffer?.deadline) {
         const deadlineDate = new Date(latestCargoOwnerOffer.deadline);
         const now = new Date();
-        
+
         if (now > deadlineDate) {
             console.log(`❌ Counter-offer for bid ${bidId} has expired. Deadline was ${latestCargoOwnerOffer.deadline}`);
             throw new Error('Counter-offer has expired. The deadline has passed.');
         }
     }
 
-    // Find the latest cargo owner counter-offer and mark it as accepted
-    const updatedHistory = existingBid.offerHistory.map((offer, index) => {
-        // Mark the last pending cargo owner offer as accepted
-        if (
-            offer.offeredBy === 'cargo_owner' &&
-            offer.status === 'pending' &&
-            index === existingBid.offerHistory.length - 1
-        ) {
-            return { ...offer, status: 'accepted' as const };
-        }
-        return offer;
-    });
+    // Determine final values from the accepted offer
+    const finalAmount = latestCargoOwnerOffer?.amount || existingBid.pricing.amount;
+    const finalTrucks = latestCargoOwnerOffer?.trucks || existingBid.trucksProvided;
 
-    // Get the accepted offer to update package-level bids
-    const acceptedOffer = updatedHistory[updatedHistory.length - 1];
-    const finalAmount = acceptedOffer?.amount || existingBid.pricing.amount;
-    const finalTrucks = acceptedOffer?.trucks || existingBid.trucksProvided;
-
-    // Prepare update data - only update offerHistory
+    // Prepare update data
     const updateData: Record<string, unknown> = {
-        offerHistory: updatedHistory,
         updatedAt: admin.firestore.Timestamp.now(),
     };
 
-    // If this bid has packageBids, update their amounts and trucks
-    // This is where the negotiated values are stored for package-level bids
-    // Do NOT update bid-level pricing.amount and trucksProvided
+    // Update packageBids with mirrored accepted status in their histories
     if (existingBid.packageBids && existingBid.packageBids.length > 0) {
-        const updatedPackageBids = existingBid.packageBids.map(pkgBid => ({
-            ...pkgBid,
-            bidAmount: finalAmount,
-            trucksProvided: finalTrucks,
-        }));
+        const updatedPackageBids = existingBid.packageBids.map(pkgBid => {
+            const pkgHistory = pkgBid.offerHistory || [];
+            const updatedPkgHistory = pkgHistory.map((offer, index) => {
+                if (
+                    offer.offeredBy === 'cargo_owner' &&
+                    offer.status === 'pending' &&
+                    index === pkgHistory.length - 1
+                ) {
+                    return { ...offer, status: 'accepted' as const };
+                }
+                return offer;
+            });
+            return {
+                ...pkgBid,
+                bidAmount: finalAmount,
+                trucksProvided: finalTrucks,
+                offerHistory: updatedPkgHistory
+            };
+        });
         updateData.packageBids = updatedPackageBids;
     }
 
+    // Still update top-level offerHistory for deprecated compatibility
+    if (existingBid.offerHistory && existingBid.offerHistory.length > 0) {
+        const updatedHistory = existingBid.offerHistory.map((offer, index) => {
+            if (
+                offer.offeredBy === 'cargo_owner' &&
+                offer.status === 'pending' &&
+                index === existingBid.offerHistory!.length - 1
+            ) {
+                return { ...offer, status: 'accepted' as const };
+            }
+            return offer;
+        });
+        updateData.offerHistory = updatedHistory;
+    }
+
     // Update ONLY the offerHistory and packageBids - DO NOT change bid status to Accepted
-    // The cargo owner will change status to Accepted when they allocate trucks
     await retryDatabaseOperation(
         async () => {
             await docRef.update(updateData);
@@ -815,7 +893,7 @@ export async function transporterCounterOffer(
 
     // Add transporter counter offer to history
     const counterOffer: OfferHistory = {
-        id: crypto.randomUUID(),
+        id: `offer-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         amount,
         currency: existingBid.pricing.currency,
         status: 'pending',
@@ -825,26 +903,24 @@ export async function transporterCounterOffer(
         timestamp: now,
     };
 
-    const updatedHistory = [...(existingBid.offerHistory || []), counterOffer];
-
-    // Prepare update data - only update offerHistory and status
+    // Prepare update data - update status and mirrored offerHistory
     const updateData: Record<string, unknown> = {
         status: BidStatus.PENDING as BidStatus,
-        offerHistory: updatedHistory,
         updatedAt: admin.firestore.Timestamp.now(),
     };
 
-    // If this bid has packageBids, update their amounts and trucks
-    // This is where the negotiated values are stored for package-level bids
-    // Do NOT update bid-level pricing.amount and trucksProvided
+    // Mirror counter offer in packageBids if they exist
     if (existingBid.packageBids && existingBid.packageBids.length > 0) {
-        const updatedPackageBids = existingBid.packageBids.map(pkgBid => ({
+        updateData.packageBids = existingBid.packageBids.map(pkgBid => ({
             ...pkgBid,
             bidAmount: amount,
             trucksProvided: trucksToAllocate,
+            offerHistory: [...(pkgBid.offerHistory || []), counterOffer],
         }));
-        updateData.packageBids = updatedPackageBids;
     }
+
+    // Still update top-level offerHistory for now
+    updateData.offerHistory = [...(existingBid.offerHistory || []), counterOffer];
 
     await retryDatabaseOperation(
         async () => {

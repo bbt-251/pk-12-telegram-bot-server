@@ -71,6 +71,7 @@ export interface PackageBid {
     extensionRequestedAt?: string;
     extensionStatus?: 'pending' | 'approved' | 'rejected';
     extendedDeadline?: string;
+    offerHistory?: OfferHistory[]; // History of all offers and counter-offers for this package
 }
 
 export interface BidTruckDetails {
@@ -106,7 +107,7 @@ export interface Bid {
     notes?: string;
     validUntil?: firestore.Timestamp;
     packageBids?: PackageBid[]; // Per-package bids (new for package-level bidding)
-    offerHistory: OfferHistory[]; // History of all offers and counter-offers
+    offerHistory?: OfferHistory[]; // @deprecated History has moved to PackageBid.offerHistory
     createdAt: firestore.Timestamp;
     updatedAt: firestore.Timestamp;
 }
