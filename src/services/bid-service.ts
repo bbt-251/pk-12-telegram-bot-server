@@ -739,7 +739,12 @@ ${lowestBidDisplay}
  * Accept a counter offer - only updates offerHistory, does NOT change bid status to Accepted
  * The bid status will be changed to Accepted later when cargo owner allocates trucks
  */
-export async function acceptCounterOffer(bidId: string, projectName: string): Promise<Bid | null> {
+export async function acceptCounterOffer(
+    bidId: string,
+    projectName: string,
+    packageItemId?: string,
+    packageGroupId?: string,
+): Promise<Bid | null> {
     const db = (await getHealthyDbInstances())[projectName];
     if (!db) {
         throw new Error(`Database for project ${projectName} is not available`);
@@ -764,8 +769,10 @@ export async function acceptCounterOffer(bidId: string, projectName: string): Pr
 
     // Use the first package's history as the master if top-level is empty or missing
     // In our new model, we should probably prefer packageBids[0].offerHistory
-    const masterHistory = (existingBid.packageBids && existingBid.packageBids[0]?.offerHistory)
-        || existingBid.offerHistory || [];
+    const masterHistory =
+        (existingBid.packageBids && existingBid.packageBids[0]?.offerHistory) ||
+        existingBid.offerHistory ||
+        [];
 
     // Find the latest cargo owner counter-offer
     const latestCargoOwnerOffer = masterHistory
@@ -779,7 +786,9 @@ export async function acceptCounterOffer(bidId: string, projectName: string): Pr
         const now = new Date();
 
         if (now > deadlineDate) {
-            console.log(`❌ Counter-offer for bid ${bidId} has expired. Deadline was ${latestCargoOwnerOffer.deadline}`);
+            console.log(
+                `❌ Counter-offer for bid ${bidId} has expired. Deadline was ${latestCargoOwnerOffer.deadline}`,
+            );
             throw new Error('Counter-offer has expired. The deadline has passed.');
         }
     }
@@ -799,9 +808,17 @@ export async function acceptCounterOffer(bidId: string, projectName: string): Pr
 
         // Find which package has the offer we are accepting
         let targetIndex = -1;
-        if (latestCargoOwnerOffer) {
+        if (packageItemId) {
+            targetIndex = packageBids.findIndex(
+                pb =>
+                    pb.packageItemId === packageItemId &&
+                    (!packageGroupId || pb.packageGroupId === packageGroupId),
+            );
+        }
+
+        if (targetIndex === -1 && latestCargoOwnerOffer) {
             targetIndex = packageBids.findIndex(pb =>
-                (pb.offerHistory || []).some(o => o.id === latestCargoOwnerOffer?.id)
+                (pb.offerHistory || []).some(o => o.id === latestCargoOwnerOffer?.id),
             );
         }
 

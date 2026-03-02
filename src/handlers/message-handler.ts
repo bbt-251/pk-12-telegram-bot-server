@@ -379,7 +379,7 @@ export async function handleCounterOfferTrucks(
         chatId,
         `💰 Confirm your counter-offer:\n\n` +
         `📦 Load Request: #${state.loadRequestDisplayID}\n` +
-        `${state.originalBidDisplay || `💰 Your Original Bid: ETB ${state.originalBidAmount.toLocaleString()}`}\n` +
+        `💰 Your Original Bid: ETB ${state.originalBidAmount.toLocaleString()}\n` +
         `💰 Current Offer: ETB ${state.cargoOwnerOfferAmount.toLocaleString()}\n` +
         `💰 Your Counter-Offer: ETB ${state.counterAmount.toLocaleString()}\n` +
         `🚛 Trucks: ${trucks}\n\n` +
