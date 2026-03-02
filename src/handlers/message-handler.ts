@@ -184,10 +184,10 @@ async function showBidConfirmation(
     await sendMessage(
         chatId,
         `📋 Bid Summary\n\n` +
-            `📦 Load Request: #${displayID}\n` +
-            `💰 Bid Amount: ETB ${bidAmount.toLocaleString()}\n` +
-            `🚛 Number of Trucks: ${trucks}\n\n` +
-            `Please confirm your bid:`,
+        `📦 Load Request: #${displayID}\n` +
+        `💰 Bid Amount: ETB ${bidAmount.toLocaleString()}\n` +
+        `🚛 Number of Trucks: ${trucks}\n\n` +
+        `Please confirm your bid:`,
         {
             inline_keyboard: [
                 [
@@ -257,10 +257,10 @@ export async function confirmBid(chatId: number): Promise<void> {
         await sendMessage(
             chatId,
             `✅ Bid placed successfully!\n\n` +
-                `📦 Load Request: #${pendingBid.displayID}\n` +
-                `💰 Bid Amount: ETB ${state.bidAmount!.toLocaleString()}\n` +
-                `🚛 Number of Trucks: ${state.numberOfTrucks}\n\n` +
-                `The cargo owner will review your bid. You will be notified if your bid is accepted.`,
+            `📦 Load Request: #${pendingBid.displayID}\n` +
+            `💰 Bid Amount: ETB ${state.bidAmount!.toLocaleString()}\n` +
+            `🚛 Number of Trucks: ${state.numberOfTrucks}\n\n` +
+            `The cargo owner will review your bid. You will be notified if your bid is accepted.`,
             {
                 inline_keyboard: [[{ text: "📋 View My Bids", callback_data: "view_my_bids" }]],
             },
@@ -344,8 +344,8 @@ export async function handleCounterOfferAmount(
     await sendMessage(
         chatId,
         `✅ Counter-offer amount: ETB ${amount.toLocaleString()}\n\n` +
-            `🚛 How many trucks can you provide?\n\n` +
-            `Please enter the number of trucks:`,
+        `🚛 How many trucks can you provide?\n\n` +
+        `Please enter the number of trucks:`,
     );
 }
 
@@ -378,12 +378,12 @@ export async function handleCounterOfferTrucks(
     await sendMessage(
         chatId,
         `💰 Confirm your counter-offer:\n\n` +
-            `📦 Load Request: #${state.loadRequestDisplayID}\n` +
-            `💰 Your Original Bid: ETB ${state.originalBidAmount.toLocaleString()}\n` +
-            `💰 Current Offer: ETB ${state.cargoOwnerOfferAmount.toLocaleString()}\n` +
-            `💰 Your Counter-Offer: ETB ${state.counterAmount.toLocaleString()}\n` +
-            `🚛 Trucks: ${trucks}\n\n` +
-            `Do you want to proceed?`,
+        `📦 Load Request: #${state.loadRequestDisplayID}\n` +
+        `${state.originalBidDisplay || `💰 Your Original Bid: ETB ${state.originalBidAmount.toLocaleString()}`}\n` +
+        `💰 Current Offer: ETB ${state.cargoOwnerOfferAmount.toLocaleString()}\n` +
+        `💰 Your Counter-Offer: ETB ${state.counterAmount.toLocaleString()}\n` +
+        `🚛 Trucks: ${trucks}\n\n` +
+        `Do you want to proceed?`,
         {
             inline_keyboard: [
                 [

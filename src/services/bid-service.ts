@@ -793,28 +793,48 @@ export async function acceptCounterOffer(bidId: string, projectName: string): Pr
         updatedAt: admin.firestore.Timestamp.now(),
     };
 
-    // Update packageBids with mirrored accepted status in their histories
+    // Update only the targeted package bid
     if (existingBid.packageBids && existingBid.packageBids.length > 0) {
-        const updatedPackageBids = existingBid.packageBids.map(pkgBid => {
+        const packageBids = [...existingBid.packageBids];
+
+        // Find which package has the offer we are accepting
+        let targetIndex = -1;
+        if (latestCargoOwnerOffer) {
+            targetIndex = packageBids.findIndex(pb =>
+                (pb.offerHistory || []).some(o => o.id === latestCargoOwnerOffer?.id)
+            );
+        }
+
+        // Fallback to first package for legacy data/safety
+        if (targetIndex === -1) targetIndex = 0;
+
+        const pkgBid = packageBids[targetIndex];
+        if (pkgBid) {
             const pkgHistory = pkgBid.offerHistory || [];
-            const updatedPkgHistory = pkgHistory.map((offer, index) => {
+            const updatedPkgHistory = pkgHistory.map((offer) => {
                 if (
-                    offer.offeredBy === 'cargo_owner' &&
-                    offer.status === 'pending' &&
-                    index === pkgHistory.length - 1
+                    latestCargoOwnerOffer &&
+                    offer.id === latestCargoOwnerOffer.id
                 ) {
                     return { ...offer, status: 'accepted' as const };
                 }
                 return offer;
             });
-            return {
+
+            packageBids[targetIndex] = {
                 ...pkgBid,
+                status: PackageBidStatus.PENDING,
                 bidAmount: finalAmount,
                 trucksProvided: finalTrucks,
                 offerHistory: updatedPkgHistory
-            };
-        });
-        updateData.packageBids = updatedPackageBids;
+            } as any;
+            updateData.packageBids = packageBids;
+
+            // Also update top-level status to Pending if agreement reached
+            updateData.status = BidStatus.PENDING;
+            updateData['pricing.amount'] = finalAmount;
+            updateData.trucksProvided = finalTrucks;
+        }
     }
 
     // Still update top-level offerHistory for deprecated compatibility
@@ -866,6 +886,8 @@ export async function transporterCounterOffer(
     transporterName: string,
     projectName: string,
     trucksToAllocate: number,
+    packageItemId?: string,
+    packageGroupId?: string,
 ): Promise<Bid | null> {
     const db = (await getHealthyDbInstances())[projectName];
     if (!db) {
@@ -909,14 +931,45 @@ export async function transporterCounterOffer(
         updatedAt: admin.firestore.Timestamp.now(),
     };
 
-    // Mirror counter offer in packageBids if they exist
+    // Update only the targeted package with the counter offer
     if (existingBid.packageBids && existingBid.packageBids.length > 0) {
-        updateData.packageBids = existingBid.packageBids.map(pkgBid => ({
-            ...pkgBid,
-            bidAmount: amount,
-            trucksProvided: trucksToAllocate,
-            offerHistory: [...(pkgBid.offerHistory || []), counterOffer],
-        }));
+        const packageBids = [...existingBid.packageBids];
+
+        // Heuristic: target the package the transporter is likely responding to
+        const latestCOOffer = (existingBid.offerHistory || [])
+            .filter(o => o.offeredBy === 'cargo_owner')
+            .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+
+        let targetIndex = -1;
+        if (packageItemId) {
+            targetIndex = packageBids.findIndex(pb =>
+                pb.packageItemId === packageItemId &&
+                (!packageGroupId || pb.packageGroupId === packageGroupId)
+            );
+        }
+
+        if (targetIndex === -1 && latestCOOffer) {
+            targetIndex = packageBids.findIndex(pb =>
+                (pb.offerHistory || []).some(o => o.id === latestCOOffer.id)
+            );
+        }
+
+        // Fallback to first if still unknown
+        if (targetIndex === -1) targetIndex = 0;
+
+        const pkgBid = packageBids[targetIndex];
+        if (pkgBid) {
+            packageBids[targetIndex] = {
+                ...pkgBid,
+                status: PackageBidStatus.TRANS_COUNTER,
+                // bidAmount and trucksProvided stay fixed during negotiation
+                offerHistory: [...(pkgBid.offerHistory || []), counterOffer],
+            } as any;
+            updateData.packageBids = packageBids;
+        }
+
+        // Also update top-level status to signal negotiation
+        updateData.status = BidStatus.COUNTER_OFFER;
     }
 
     // Still update top-level offerHistory for now

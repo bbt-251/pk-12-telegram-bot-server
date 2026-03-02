@@ -38,8 +38,11 @@ export interface CounterOfferState {
     counterAmount: number;
     trucks: number;
     originalBidAmount: number;
+    originalBidDisplay?: string; // Formatted display for original package bids
     cargoOwnerOfferAmount: number; // The cargo owner's counter offer amount
     timestamp: number;
+    packageItemId?: string | undefined;
+    packageGroupId?: string | undefined;
 }
 
 // In-memory storage for counter offer states
@@ -517,10 +520,10 @@ async function handleAcceptCounterCallback(
             await sendMessage(
                 userChatId,
                 `✅ Counter-offer accepted!\n\n` +
-                    `📦 Load Request: #${loadRequest?.displayID || bid.loadRequestID}\n` +
-                    `💰 Agreed Amount: ETB ${updatedBid.pricing.amount.toLocaleString()}\n` +
-                    `🚛 Trucks: ${updatedBid.trucksProvided}\n\n` +
-                    `The negotiation is complete. The cargo owner will review and allocate trucks. You will receive a notification with transport details submission deadline once they confirm.`,
+                `📦 Load Request: #${loadRequest?.displayID || bid.loadRequestID}\n` +
+                `💰 Agreed Amount: ETB ${updatedBid.pricing.amount.toLocaleString()}\n` +
+                `🚛 Trucks: ${updatedBid.trucksProvided}\n\n` +
+                `The negotiation is complete. The cargo owner will review and allocate trucks. You will receive a notification with transport details submission deadline once they confirm.`,
             );
             console.log(`✅ Transporter ${transporter.id} accepted counter offer for bid ${bidId} - negotiation complete`);
         } else {
@@ -531,7 +534,7 @@ async function handleAcceptCounterCallback(
         }
     } catch (error) {
         console.error("Error accepting counter offer:", error);
-        
+
         // Check if error is about expired deadline
         const errorMessage = error instanceof Error ? error.message : String(error);
         if (errorMessage.includes('expired') || errorMessage.includes('deadline')) {
@@ -608,6 +611,24 @@ async function handleCounterOfferCallback(
         const counterOfferAmount = latestCargoOwnerOffer?.amount || bid.pricing.amount;
         const counterOfferTrucks = latestCargoOwnerOffer?.trucks || bid.trucksProvided;
 
+        // Find which package has this counter offer to isolate changes
+        let targetPackageItemId: string | undefined = undefined;
+        let targetPackageGroupId: string | undefined = undefined;
+        if (latestCargoOwnerOffer) {
+            const pkg = (bid.packageBids || []).find(pb =>
+                (pb.offerHistory || []).some(o => o.id === latestCargoOwnerOffer.id)
+            );
+            targetPackageItemId = pkg?.packageItemId;
+            targetPackageGroupId = pkg?.packageGroupId;
+        }
+
+        // Format original bid lines from package level
+        const originalBidLines = (bid.packageBids && bid.packageBids.length > 0)
+            ? bid.packageBids.map(pb =>
+                `💰 *Your Original Bid${bid.packageBids!.length > 1 ? ` (${pb.packageGroupData?.packagingType || 'Package'})` : ''}:* ETB ${pb.bidAmount.toLocaleString()}`
+            ).join('\n')
+            : `💰 *Your Original Bid:* ETB ${bid.pricing.amount.toLocaleString()}`;
+
         // Store counter offer state for this user with correct display ID
         counterOfferStates.set(userChatId, {
             bidId,
@@ -617,8 +638,11 @@ async function handleCounterOfferCallback(
             counterAmount: 0,
             trucks: 0,
             originalBidAmount: bid.pricing.amount,
+            originalBidDisplay: originalBidLines,
             cargoOwnerOfferAmount: counterOfferAmount, // Store cargo owner's offer
             timestamp: Date.now(),
+            packageItemId: targetPackageItemId,
+            packageGroupId: targetPackageGroupId,
         });
 
         // Answer callback to remove loading state
@@ -632,7 +656,7 @@ async function handleCounterOfferCallback(
 📦 *Load Request:* ${displayID}
 
 💰 *Counter Offer:* ETB ${counterOfferAmount.toLocaleString()}
-💰 *Your Original Bid:* ETB ${bid.pricing.amount.toLocaleString()}
+${originalBidLines}
 ${trucksLine}
 👇 *Please enter your counter-offer amount (ETB):*
         `.trim();
@@ -691,6 +715,8 @@ async function handleConfirmCounterOfferCallback(
             `${transporter.firstName} ${transporter.lastName || ""}`.trim(),
             projectName,
             state.trucks,
+            state.packageItemId,
+            state.packageGroupId,
         );
 
         if (updatedBid) {
@@ -698,8 +724,8 @@ async function handleConfirmCounterOfferCallback(
             await sendMessage(
                 userChatId,
                 `✅ Your counter-offer of ETB ${state.counterAmount.toLocaleString()} has been sent to the cargo owner.\n\n` +
-                    `📦 Load Request: #${state.loadRequestDisplayID}\n` +
-                    `💰 Your Counter-Offer: ETB ${state.counterAmount.toLocaleString()}`,
+                `📦 Load Request: #${state.loadRequestDisplayID}\n` +
+                `💰 Your Counter-Offer: ETB ${state.counterAmount.toLocaleString()}`,
             );
 
             // Clear counter offer state
