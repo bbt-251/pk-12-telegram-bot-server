@@ -9,7 +9,7 @@ import {
     transporterCounterOffer,
 } from "../services/bid-service";
 import { sendMessage } from "../bot";
-import { confirmBid } from "./message-handler";
+import { confirmBid, restartCounterOfferFlow } from "./message-handler";
 import { formatDate } from "../dayjs_util";
 import { getExternalTransportDetailsUrl } from "../firebase-config";
 
@@ -77,6 +77,8 @@ export async function handleCallbackQuery(
         await handleCounterOfferCallback(bot, callbackId, data, chatId, userId);
     } else if (data.startsWith("confirm_counter_")) {
         await handleConfirmCounterOfferCallback(bot, callbackId, data, chatId, userId);
+    } else if (data.startsWith("edit_counter_")) {
+        await handleEditCounterOfferCallback(bot, callbackId, data, chatId, userId);
     } else if (data.startsWith("cancel_counter_")) {
         await handleCancelCounterOfferCallback(bot, callbackId, data, chatId, userId);
     } else {
@@ -770,6 +772,27 @@ async function handleConfirmCounterOfferCallback(
         });
     }
 }
+
+/**
+ * Handle "Edit Counter Offer" button click
+ */
+async function handleEditCounterOfferCallback(
+    bot: TelegramBot,
+    callbackId: string,
+    _data: string,
+    chatId: number,
+    userId?: number,
+): Promise<void> {
+    const userChatId = userId || chatId;
+    console.log(`✏️ Editing counter offer for chat ${userChatId}`);
+
+    // Answer callback to remove loading state
+    await bot.answerCallbackQuery(callbackId);
+
+    // Restart the flow
+    await restartCounterOfferFlow(userChatId);
+}
+
 
 /**
  * Handle "Cancel Counter Offer" button click

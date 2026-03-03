@@ -346,6 +346,14 @@ export async function handleCounterOfferAmount(
         `✅ Counter-offer amount: ETB ${amount.toLocaleString()}\n\n` +
         `🚛 How many trucks can you provide?\n\n` +
         `Please enter the number of trucks:`,
+        {
+            inline_keyboard: [
+                [
+                    { text: "✏️ Edit Amount", callback_data: `edit_counter_${state.bidId}` },
+                    { text: "❌ Cancel", callback_data: `cancel_counter_${state.bidId}` },
+                ],
+            ],
+        },
     );
 }
 
@@ -391,10 +399,39 @@ export async function handleCounterOfferTrucks(
                         text: "✅ Confirm",
                         callback_data: `confirm_counter_${state.bidId}`,
                     },
-                    { text: "❌ Cancel", callback_data: `cancel_counter_${state.bidId}` },
+                    { text: "✏️ Edit", callback_data: `edit_counter_${state.bidId}` },
                 ],
+                [{ text: "❌ Cancel", callback_data: `cancel_counter_${state.bidId}` }],
             ],
         },
     );
+}
+
+/**
+ * Restart the counter offer flow from the beginning (for edit)
+ */
+export async function restartCounterOfferFlow(chatId: number): Promise<void> {
+    const state = getCounterOfferStateByChatId(chatId);
+    if (!state) {
+        await sendMessage(chatId, "❌ Counter offer session expired. Please start over.");
+        return;
+    }
+
+    // Reset amount and trucks in state to restart the flow
+    state.counterAmount = 0;
+    state.trucks = 0;
+
+    const message = `
+🔄 *Counter Offer (Edit)*
+
+📦 *Load Request:* ${state.loadRequestDisplayID}
+
+💰 *Current Offer:* ETB ${state.cargoOwnerOfferAmount.toLocaleString()}
+💰 *Your Original Bid:* ETB ${state.originalBidAmount.toLocaleString()}
+
+👇 *Please enter your counter-offer amount (ETB):*
+    `.trim();
+
+    await sendMessage(chatId, message);
 }
 
