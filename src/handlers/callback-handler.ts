@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import TelegramBot from "node-telegram-bot-api";
 import { findTransporterByChatId } from "../services/transporter-service";
 import {
@@ -527,16 +528,45 @@ async function handleAcceptCounterCallback(
             // Get load request to use display ID
             const loadRequest = await getLoadRequestById(bid.loadRequestID, projectName);
 
+            // Notify CargoLink: bid_counter_offer_response
+            try {
+                const cargoLinkBaseUrl = process.env.CARGOLINK_BASE_URL || "https://cargolink.app";
+                const sharedApiKey = process.env.PK12_SHARED_API_KEY || "";
+
+                fetch(`${cargoLinkBaseUrl}/api/pk-12/notification`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-api-key": sharedApiKey,
+                    },
+                    body: JSON.stringify({
+                        eventType: "bid_counter_offer_response",
+                        loadRequestId: bid.loadRequestID,
+                        shipmentId: (loadRequest as any)?.shipmentId || "",
+                        bidderId: transporter.uid || transporter.id,
+                        bidderName:
+                            `${transporter.firstName || ""} ${transporter.lastName || ""}`.trim() ||
+                            "Transporter",
+                    }),
+                }).catch((err: unknown) =>
+                    console.error("Failed to send bid_counter_offer_response notification:", err),
+                );
+            } catch (notifErr) {
+                console.error("Failed to send counter-offer response notification:", notifErr);
+            }
+
             // Send confirmation - negotiation is complete, waiting for cargo owner to allocate trucks
             await sendMessage(
                 userChatId,
                 `✅ Counter-offer accepted!\n\n` +
-                `📦 Load Request: #${loadRequest?.displayID || bid.loadRequestID}\n` +
-                `💰 Agreed Amount: ETB ${updatedBid.pricing.amount.toLocaleString()}\n` +
-                `🚛 Trucks: ${updatedBid.trucksProvided}\n\n` +
-                `The negotiation is complete. The cargo owner will review and allocate trucks. You will receive a notification with transport details submission deadline once they confirm.`,
+                    `📦 Load Request: #${loadRequest?.displayID || bid.loadRequestID}\n` +
+                    `💰 Agreed Amount: ETB ${updatedBid.pricing.amount.toLocaleString()}\n` +
+                    `🚛 Trucks: ${updatedBid.trucksProvided}\n\n` +
+                    `The negotiation is complete. The cargo owner will review and allocate trucks. You will receive a notification with transport details submission deadline once they confirm.`,
             );
-            console.log(`✅ Transporter ${transporter.id} accepted counter offer for bid ${bidId} - negotiation complete`);
+            console.log(
+                `✅ Transporter ${transporter.id} accepted counter offer for bid ${bidId} - negotiation complete`,
+            );
         } else {
             await bot.answerCallbackQuery(callbackId, {
                 text: "❌ Failed to accept counter offer. Please try again.",
@@ -548,7 +578,7 @@ async function handleAcceptCounterCallback(
 
         // Check if error is about expired deadline
         const errorMessage = error instanceof Error ? error.message : String(error);
-        if (errorMessage.includes('expired') || errorMessage.includes('deadline')) {
+        if (errorMessage.includes("expired") || errorMessage.includes("deadline")) {
             await bot.answerCallbackQuery(callbackId, {
                 text: "⏰ This counter-offer has expired. The deadline has passed.",
                 show_alert: true,
@@ -626,7 +656,7 @@ async function handleCounterOfferCallback(
 
         // Get the latest counter offer from cargo owner (most recent offer in history)
         const latestCargoOwnerOffer = bid.offerHistory
-            ?.filter(offer => offer.offeredBy === 'cargo_owner')
+            ?.filter(offer => offer.offeredBy === "cargo_owner")
             ?.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
 
         const counterOfferAmount = latestCargoOwnerOffer?.amount || bid.pricing.amount;
@@ -637,20 +667,22 @@ async function handleCounterOfferCallback(
         let targetPackageGroupId: string | undefined = undefined;
 
         if (targetPackageItemId) {
-            const pkg = (bid.packageBids || []).find(pb => pb.packageItemId === targetPackageItemId);
+            const pkg = (bid.packageBids || []).find(
+                pb => pb.packageItemId === targetPackageItemId,
+            );
             targetPackageGroupId = pkg?.packageGroupId;
         } else if (latestCargoOwnerOffer) {
             const pkg = (bid.packageBids || []).find(pb =>
-                (pb.offerHistory || []).some(o => o.id === latestCargoOwnerOffer.id)
+                (pb.offerHistory || []).some(o => o.id === latestCargoOwnerOffer.id),
             );
             targetPackageItemId = pkg?.packageItemId || "";
             targetPackageGroupId = pkg?.packageGroupId;
         }
 
-
         // Determine original bid amount for the targeted package
         const originalBidAmount = targetPackageItemId
-            ? (bid.packageBids?.find(pb => pb.packageItemId === targetPackageItemId)?.bidAmount || bid.pricing.amount)
+            ? bid.packageBids?.find(pb => pb.packageItemId === targetPackageItemId)?.bidAmount ||
+              bid.pricing.amount
             : bid.pricing.amount;
 
         // Store counter offer state for this user with correct display ID
@@ -747,9 +779,43 @@ async function handleConfirmCounterOfferCallback(
             await sendMessage(
                 userChatId,
                 `✅ Your counter-offer of ETB ${state.counterAmount.toLocaleString()} has been sent to the cargo owner.\n\n` +
-                `📦 Load Request: #${state.loadRequestDisplayID}\n` +
-                `💰 Your Counter-Offer: ETB ${state.counterAmount.toLocaleString()}`,
+                    `📦 Load Request: #${state.loadRequestDisplayID}\n` +
+                    `💰 Your Counter-Offer: ETB ${state.counterAmount.toLocaleString()}`,
             );
+
+            // Notify CargoLink: bid_counter_offer_response
+            try {
+                const cargoLinkBaseUrl =
+                    process.env.CARGOLINK_BASE_URL || "https://int.cargolink.io";
+                const sharedApiKey = process.env.PK12_SHARED_API_KEY || "";
+
+                const bid = await getBidById(state.bidId, projectName);
+                const loadRequest = bid
+                    ? await getLoadRequestById(bid.loadRequestID, projectName)
+                    : null;
+
+                fetch(`${cargoLinkBaseUrl}/api/pk-12/notification`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-api-key": sharedApiKey,
+                    },
+                    body: JSON.stringify({
+                        eventType: "bid_counter_offer_response",
+                        loadRequestId: bid?.loadRequestID || state.bidId,
+                        shipmentId: (loadRequest as any)?.shipmentId || "",
+                        shipmentCaseId: state.loadRequestDisplayID,
+                        bidderId: transporter.uid || transporter.id,
+                        bidderName:
+                            `${transporter.firstName || ""} ${transporter.lastName || ""}`.trim() ||
+                            "Transporter",
+                    }),
+                }).catch((err: unknown) =>
+                    console.error("Failed to send bid_counter_offer_response notification:", err),
+                );
+            } catch (notifErr) {
+                console.error("Failed to send counter-offer notification:", notifErr);
+            }
 
             // Clear counter offer state
             clearCounterOfferStateByChatId(userChatId);
@@ -792,7 +858,6 @@ async function handleEditCounterOfferCallback(
     // Restart the flow
     await restartCounterOfferFlow(userChatId);
 }
-
 
 /**
  * Handle "Cancel Counter Offer" button click
