@@ -530,8 +530,11 @@ async function handleAcceptCounterCallback(
 
             // Notify CargoLink: bid_counter_offer_response
             try {
-                const cargoLinkBaseUrl = process.env.CARGOLINK_BASE_URL || "https://cargolink.app";
-                const sharedApiKey = process.env.PK12_SHARED_API_KEY || "";
+                const cargoLinkBaseUrl =
+                    process.env.CARGOLINK_BASE_URL || "https://int.cargolink.io";
+                const sharedApiKey =
+                    process.env.PK12_SHARED_API_KEY ||
+                    "49d1a81c83fcd29c6ef81c67243f524f232d4f17c05456f9f275f999450c9ca2";
 
                 fetch(`${cargoLinkBaseUrl}/api/pk-12/notification`, {
                     method: "POST",
@@ -787,7 +790,9 @@ async function handleConfirmCounterOfferCallback(
             try {
                 const cargoLinkBaseUrl =
                     process.env.CARGOLINK_BASE_URL || "https://int.cargolink.io";
-                const sharedApiKey = process.env.PK12_SHARED_API_KEY || "";
+                const sharedApiKey =
+                    process.env.PK12_SHARED_API_KEY ||
+                    "49d1a81c83fcd29c6ef81c67243f524f232d4f17c05456f9f275f999450c9ca2";
 
                 const bid = await getBidById(state.bidId, projectName);
                 const loadRequest = bid
