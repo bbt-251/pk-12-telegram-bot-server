@@ -12,7 +12,7 @@ import {
 import { sendMessage } from "../bot";
 import { confirmBid, restartCounterOfferFlow } from "./message-handler";
 import { formatDate } from "../dayjs_util";
-import { getExternalTransportDetailsUrl } from "../firebase-config";
+import { getExternalTransportDetailsUrl, getHealthyDbInstances } from "../firebase-config";
 
 interface PendingBid {
     loadRequestId: string;
@@ -500,8 +500,24 @@ async function handleAcceptCounterCallback(
             return;
         }
 
-        // Get the bid
-        const bid = await getBidById(bidId, projectName);
+        // Get the bid - try user's project first, then fallback to other databases
+        let bid = await getBidById(bidId, projectName);
+        let bidProjectName = projectName;
+        if (!bid) {
+            const healthyDbs = await getHealthyDbInstances();
+            for (const otherProject of Object.keys(healthyDbs)) {
+                if (otherProject !== projectName) {
+                    bid = await getBidById(bidId, otherProject);
+                    if (bid) {
+                        bidProjectName = otherProject;
+                        console.info(
+                            `📍 Bid ${bidId} found in ${otherProject} (user was in ${projectName})`,
+                        );
+                        break;
+                    }
+                }
+            }
+        }
         if (!bid) {
             await bot.answerCallbackQuery(callbackId, {
                 text: "❌ Bid not found.",
@@ -520,13 +536,13 @@ async function handleAcceptCounterCallback(
         }
 
         // Accept the counter offer
-        const updatedBid = await acceptCounterOffer(bidId, projectName, packageItemId);
+        const updatedBid = await acceptCounterOffer(bidId, bidProjectName, packageItemId);
 
         if (updatedBid) {
             await bot.answerCallbackQuery(callbackId);
 
             // Get load request to use display ID
-            const loadRequest = await getLoadRequestById(bid.loadRequestID, projectName);
+            const loadRequest = await getLoadRequestById(bid.loadRequestID, bidProjectName);
 
             // Notify CargoLink: bid_counter_offer_response
             try {
@@ -634,8 +650,24 @@ async function handleCounterOfferCallback(
             return;
         }
 
-        // Get the bid
-        const bid = await getBidById(coBidId, projectName);
+        // Get the bid - try user's project first, then fallback to other databases
+        let bid = await getBidById(coBidId, projectName);
+        let bidProjectName = projectName;
+        if (!bid) {
+            const healthyDbs = await getHealthyDbInstances();
+            for (const otherProject of Object.keys(healthyDbs)) {
+                if (otherProject !== projectName) {
+                    bid = await getBidById(coBidId, otherProject);
+                    if (bid) {
+                        bidProjectName = otherProject;
+                        console.info(
+                            `📍 Bid ${coBidId} found in ${otherProject} (user was in ${projectName})`,
+                        );
+                        break;
+                    }
+                }
+            }
+        }
         if (!bid) {
             await bot.answerCallbackQuery(callbackId, {
                 text: "❌ Bid not found.",
@@ -654,7 +686,7 @@ async function handleCounterOfferCallback(
         }
 
         // Get the load request to fetch the display ID
-        const loadRequest = await getLoadRequestById(bid.loadRequestID, projectName);
+        const loadRequest = await getLoadRequestById(bid.loadRequestID, bidProjectName);
         const displayID = loadRequest?.displayID || bid.loadRequestID;
 
         // Get the latest counter offer from cargo owner (most recent offer in history)
@@ -692,7 +724,7 @@ async function handleCounterOfferCallback(
         counterOfferStates.set(userChatId, {
             bidId: coBidId,
             transporterId: transporter.id,
-            projectName,
+            projectName: bidProjectName,
             loadRequestDisplayID: displayID,
             counterAmount: 0,
             trucks: 0,
@@ -754,7 +786,7 @@ async function handleConfirmCounterOfferCallback(
             return;
         }
 
-        const { transporter, projectName } = result;
+        const { transporter } = result;
 
         // Get counter offer state
         const state = getCounterOfferStateByChatId(userChatId);
@@ -766,12 +798,12 @@ async function handleConfirmCounterOfferCallback(
             return;
         }
 
-        // Submit the counter offer
+        // Submit the counter offer using the project where the bid lives
         const updatedBid = await transporterCounterOffer(
             state.bidId,
             state.counterAmount,
             `${transporter.firstName} ${transporter.lastName || ""}`.trim(),
-            projectName,
+            state.projectName,
             state.trucks,
             state.packageItemId,
             state.packageGroupId,
@@ -794,9 +826,9 @@ async function handleConfirmCounterOfferCallback(
                     process.env.PK12_SHARED_API_KEY ||
                     "49d1a81c83fcd29c6ef81c67243f524f232d4f17c05456f9f275f999450c9ca2";
 
-                const bid = await getBidById(state.bidId, projectName);
+                const bid = await getBidById(state.bidId, state.projectName);
                 const loadRequest = bid
-                    ? await getLoadRequestById(bid.loadRequestID, projectName)
+                    ? await getLoadRequestById(bid.loadRequestID, state.projectName)
                     : null;
 
                 fetch(`${cargoLinkBaseUrl}/api/pk-12/notification`, {
