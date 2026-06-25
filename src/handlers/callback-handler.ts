@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import TelegramBot from "node-telegram-bot-api";
 import { findTransporterByChatId } from "../services/transporter-service";
 import {
@@ -9,9 +10,9 @@ import {
     transporterCounterOffer,
 } from "../services/bid-service";
 import { sendMessage } from "../bot";
-import { confirmBid } from "./message-handler";
+import { confirmBid, restartCounterOfferFlow } from "./message-handler";
 import { formatDate } from "../dayjs_util";
-import { getExternalTransportDetailsUrl } from "../firebase-config";
+import { getExternalTransportDetailsUrl, getHealthyDbInstances } from "../firebase-config";
 
 interface PendingBid {
     loadRequestId: string;
@@ -36,8 +37,12 @@ export interface CounterOfferState {
     projectName: string;
     loadRequestDisplayID: string;
     counterAmount: number;
+    trucks: number;
     originalBidAmount: number;
+    cargoOwnerOfferAmount: number; // The cargo owner's counter offer amount
     timestamp: number;
+    packageItemId?: string | undefined;
+    packageGroupId?: string | undefined;
 }
 
 // In-memory storage for counter offer states
@@ -73,6 +78,8 @@ export async function handleCallbackQuery(
         await handleCounterOfferCallback(bot, callbackId, data, chatId, userId);
     } else if (data.startsWith("confirm_counter_")) {
         await handleConfirmCounterOfferCallback(bot, callbackId, data, chatId, userId);
+    } else if (data.startsWith("edit_counter_")) {
+        await handleEditCounterOfferCallback(bot, callbackId, data, chatId, userId);
     } else if (data.startsWith("cancel_counter_")) {
         await handleCancelCounterOfferCallback(bot, callbackId, data, chatId, userId);
     } else {
@@ -479,12 +486,38 @@ async function handleAcceptCounterCallback(
 
         const { transporter, projectName } = result;
 
-        // Parse bid ID from callback data
-        // Callback data format: ac:<bidId>
-        const bidId = data.replace("ac:", "");
+        // Parse bid ID and package item ID from callback data
+        // Callback data format: ac:bidId:packageItemId
+        const parts = data.split(":");
+        const bidId = parts[1] as string;
+        const packageItemId = parts[2] as string;
 
-        // Get the bid
-        const bid = await getBidById(bidId, projectName);
+        if (!bidId || !packageItemId) {
+            await bot.answerCallbackQuery(callbackId, {
+                text: "❌ Invalid callback data.",
+                show_alert: true,
+            });
+            return;
+        }
+
+        // Get the bid - try user's project first, then fallback to other databases
+        let bid = await getBidById(bidId, projectName);
+        let bidProjectName = projectName;
+        if (!bid) {
+            const healthyDbs = await getHealthyDbInstances();
+            for (const otherProject of Object.keys(healthyDbs)) {
+                if (otherProject !== projectName) {
+                    bid = await getBidById(bidId, otherProject);
+                    if (bid) {
+                        bidProjectName = otherProject;
+                        console.info(
+                            `📍 Bid ${bidId} found in ${otherProject} (user was in ${projectName})`,
+                        );
+                        break;
+                    }
+                }
+            }
+        }
         if (!bid) {
             await bot.answerCallbackQuery(callbackId, {
                 text: "❌ Bid not found.",
@@ -494,7 +527,7 @@ async function handleAcceptCounterCallback(
         }
 
         // Verify this bid belongs to the transporter
-        if (bid.transporterId !== transporter.uid) {
+        if (bid.transporterId !== transporter.uid && bid.transporterId !== transporter.id) {
             await bot.answerCallbackQuery(callbackId, {
                 text: "❌ This bid does not belong to you.",
                 show_alert: true,
@@ -503,48 +536,56 @@ async function handleAcceptCounterCallback(
         }
 
         // Accept the counter offer
-        const updatedBid = await acceptCounterOffer(bidId, projectName);
+        const updatedBid = await acceptCounterOffer(bidId, bidProjectName, packageItemId);
 
         if (updatedBid) {
             await bot.answerCallbackQuery(callbackId);
 
-            // Get load request to use display ID and check status
-            const loadRequest = await getLoadRequestById(bid.loadRequestID, projectName);
+            // Get load request to use display ID
+            const loadRequest = await getLoadRequestById(bid.loadRequestID, bidProjectName);
 
-            // Only show Share Transport Details button if load request is not Confirmed
-            if (loadRequest?.status !== "Confirmed") {
-                const externalUrl = getExternalTransportDetailsUrl(
-                    bid.id,
-                    transporter.uid,
-                    projectName,
-                );
-                await sendMessage(
-                    userChatId,
-                    `✅ Counter-offer accepted!\n\n` +
-                        `📦 Load Request: #${loadRequest?.displayID || bid.loadRequestID}\n` +
-                        `💰 Final Bid Amount: ETB ${updatedBid.pricing.amount.toLocaleString()}\n\n` +
-                        `The cargo owner has been notified. You can now share transport details.`,
-                    {
-                        inline_keyboard: [
-                            [
-                                {
-                                    text: "📋 Share Transport Details",
-                                    web_app: { url: externalUrl },
-                                },
-                            ],
-                        ],
+            // Notify CargoLink: bid_counter_offer_response
+            try {
+                const cargoLinkBaseUrl =
+                    process.env.CARGOLINK_BASE_URL || "https://int.cargolink.io";
+                const sharedApiKey =
+                    process.env.PK12_SHARED_API_KEY ||
+                    "49d1a81c83fcd29c6ef81c67243f524f232d4f17c05456f9f275f999450c9ca2";
+
+                fetch(`${cargoLinkBaseUrl}/api/pk-12/notification`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-api-key": sharedApiKey,
                     },
+                    body: JSON.stringify({
+                        eventType: "bid_counter_offer_response",
+                        loadRequestId: bid.loadRequestID,
+                        shipmentId: (loadRequest as any)?.shipmentId || "",
+                        bidderId: transporter.uid || transporter.id,
+                        bidderName:
+                            `${transporter.firstName || ""} ${transporter.lastName || ""}`.trim() ||
+                            "Transporter",
+                    }),
+                }).catch((err: unknown) =>
+                    console.error("Failed to send bid_counter_offer_response notification:", err),
                 );
-            } else {
-                await sendMessage(
-                    userChatId,
-                    `✅ Counter-offer accepted!\n\n` +
-                        `📦 Load Request: #${loadRequest?.displayID || bid.loadRequestID}\n` +
-                        `💰 Final Bid Amount: ETB ${updatedBid.pricing.amount.toLocaleString()}\n\n` +
-                        `The cargo owner has been notified.`,
-                );
+            } catch (notifErr) {
+                console.error("Failed to send counter-offer response notification:", notifErr);
             }
-            console.log(`✅ Transporter ${transporter.id} accepted counter offer for bid ${bidId}`);
+
+            // Send confirmation - negotiation is complete, waiting for cargo owner to allocate trucks
+            await sendMessage(
+                userChatId,
+                `✅ Counter-offer accepted!\n\n` +
+                    `📦 Load Request: #${loadRequest?.displayID || bid.loadRequestID}\n` +
+                    `💰 Agreed Amount: ETB ${updatedBid.pricing.amount.toLocaleString()}\n` +
+                    `🚛 Trucks: ${updatedBid.trucksProvided}\n\n` +
+                    `The negotiation is complete. The cargo owner will review and allocate trucks. You will receive a notification with transport details submission deadline once they confirm.`,
+            );
+            console.log(
+                `✅ Transporter ${transporter.id} accepted counter offer for bid ${bidId} - negotiation complete`,
+            );
         } else {
             await bot.answerCallbackQuery(callbackId, {
                 text: "❌ Failed to accept counter offer. Please try again.",
@@ -553,10 +594,20 @@ async function handleAcceptCounterCallback(
         }
     } catch (error) {
         console.error("Error accepting counter offer:", error);
-        await bot.answerCallbackQuery(callbackId, {
-            text: "❌ An error occurred. Please try again.",
-            show_alert: true,
-        });
+
+        // Check if error is about expired deadline
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage.includes("expired") || errorMessage.includes("deadline")) {
+            await bot.answerCallbackQuery(callbackId, {
+                text: "⏰ This counter-offer has expired. The deadline has passed.",
+                show_alert: true,
+            });
+        } else {
+            await bot.answerCallbackQuery(callbackId, {
+                text: "❌ An error occurred. Please try again.",
+                show_alert: true,
+            });
+        }
     }
 }
 
@@ -585,12 +636,38 @@ async function handleCounterOfferCallback(
 
         const { transporter, projectName } = result;
 
-        // Parse bid ID from callback data
-        // Callback data format: co:<bidId>
-        const bidId = data.replace("co:", "");
+        // Parse bid ID and package item ID from callback data
+        // Callback data format: co:bidId:packageItemId
+        const coParts = data.split(":");
+        const coBidId = coParts[1] as string;
+        const coPackageItemId = coParts[2] as string;
 
-        // Get the bid
-        const bid = await getBidById(bidId, projectName);
+        if (!coBidId || !coPackageItemId) {
+            await bot.answerCallbackQuery(callbackId, {
+                text: "❌ Invalid callback data.",
+                show_alert: true,
+            });
+            return;
+        }
+
+        // Get the bid - try user's project first, then fallback to other databases
+        let bid = await getBidById(coBidId, projectName);
+        let bidProjectName = projectName;
+        if (!bid) {
+            const healthyDbs = await getHealthyDbInstances();
+            for (const otherProject of Object.keys(healthyDbs)) {
+                if (otherProject !== projectName) {
+                    bid = await getBidById(coBidId, otherProject);
+                    if (bid) {
+                        bidProjectName = otherProject;
+                        console.info(
+                            `📍 Bid ${coBidId} found in ${otherProject} (user was in ${projectName})`,
+                        );
+                        break;
+                    }
+                }
+            }
+        }
         if (!bid) {
             await bot.answerCallbackQuery(callbackId, {
                 text: "❌ Bid not found.",
@@ -600,7 +677,7 @@ async function handleCounterOfferCallback(
         }
 
         // Verify this bid belongs to the transporter
-        if (bid.transporterId !== transporter.id) {
+        if (bid.transporterId !== transporter.id && bid.transporterId !== transporter.uid) {
             await bot.answerCallbackQuery(callbackId, {
                 text: "❌ This bid does not belong to you.",
                 show_alert: true,
@@ -609,35 +686,74 @@ async function handleCounterOfferCallback(
         }
 
         // Get the load request to fetch the display ID
-        const loadRequest = await getLoadRequestById(bid.loadRequestID, projectName);
+        const loadRequest = await getLoadRequestById(bid.loadRequestID, bidProjectName);
         const displayID = loadRequest?.displayID || bid.loadRequestID;
+
+        // Get the latest counter offer from cargo owner (most recent offer in history)
+        const latestCargoOwnerOffer = bid.offerHistory
+            ?.filter(offer => offer.offeredBy === "cargo_owner")
+            ?.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+
+        const counterOfferAmount = latestCargoOwnerOffer?.amount || bid.pricing.amount;
+        const counterOfferTrucks = latestCargoOwnerOffer?.trucks || bid.trucksProvided;
+
+        // Use package from callback data if available, otherwise fallback to heuristics
+        let targetPackageItemId: string = coPackageItemId;
+        let targetPackageGroupId: string | undefined = undefined;
+
+        if (targetPackageItemId) {
+            const pkg = (bid.packageBids || []).find(
+                pb => pb.packageItemId === targetPackageItemId,
+            );
+            targetPackageGroupId = pkg?.packageGroupId;
+        } else if (latestCargoOwnerOffer) {
+            const pkg = (bid.packageBids || []).find(pb =>
+                (pb.offerHistory || []).some(o => o.id === latestCargoOwnerOffer.id),
+            );
+            targetPackageItemId = pkg?.packageItemId || "";
+            targetPackageGroupId = pkg?.packageGroupId;
+        }
+
+        // Determine original bid amount for the targeted package
+        const originalBidAmount = targetPackageItemId
+            ? bid.packageBids?.find(pb => pb.packageItemId === targetPackageItemId)?.bidAmount ||
+              bid.pricing.amount
+            : bid.pricing.amount;
 
         // Store counter offer state for this user with correct display ID
         counterOfferStates.set(userChatId, {
-            bidId,
+            bidId: coBidId,
             transporterId: transporter.id,
-            projectName,
+            projectName: bidProjectName,
             loadRequestDisplayID: displayID,
             counterAmount: 0,
-            originalBidAmount: bid.pricing.amount,
+            trucks: 0,
+            originalBidAmount,
+            cargoOwnerOfferAmount: counterOfferAmount, // Store cargo owner's offer
             timestamp: Date.now(),
+            packageItemId: targetPackageItemId,
+            packageGroupId: targetPackageGroupId,
         });
 
         // Answer callback to remove loading state
         await bot.answerCallbackQuery(callbackId);
 
         // Send message asking for counter offer amount
-        await sendMessage(
-            userChatId,
-            `💰 Enter your counter-offer amount:\n\n` +
-                `📦 Load Request: #${displayID}\n` +
-                `💰 Current Offer: ETB ${bid.pricing.amount.toLocaleString()}\n\n` +
-                `Please enter your counter-offer amount (ETB):`,
-        );
+        const trucksLine = counterOfferTrucks ? `🚛 *Trucks:* ${counterOfferTrucks}\n` : "";
+        const message = `
+🔄 *Counter Offer*
 
-        console.log(`✅ Started counter offer flow for bid ${bidId}`);
+📦 *Load Request:* ${displayID}
 
-        console.log(`✅ Started counter offer flow for bid ${bidId}`);
+💰 *Counter Offer:* ETB ${counterOfferAmount.toLocaleString()}
+💰 *Your Original Bid:* ETB ${originalBidAmount.toLocaleString()}
+${trucksLine}
+👇 *Please enter your counter-offer amount (ETB):*
+        `.trim();
+
+        await sendMessage(userChatId, message);
+
+        console.log(`✅ Started counter offer flow for bid ${coBidId}`);
     } catch (error) {
         console.error("Error starting counter offer:", error);
         await bot.answerCallbackQuery(callbackId, {
@@ -670,7 +786,7 @@ async function handleConfirmCounterOfferCallback(
             return;
         }
 
-        const { transporter, projectName } = result;
+        const { transporter } = result;
 
         // Get counter offer state
         const state = getCounterOfferStateByChatId(userChatId);
@@ -682,12 +798,15 @@ async function handleConfirmCounterOfferCallback(
             return;
         }
 
-        // Submit the counter offer
+        // Submit the counter offer using the project where the bid lives
         const updatedBid = await transporterCounterOffer(
             state.bidId,
             state.counterAmount,
             `${transporter.firstName} ${transporter.lastName || ""}`.trim(),
-            projectName,
+            state.projectName,
+            state.trucks,
+            state.packageItemId,
+            state.packageGroupId,
         );
 
         if (updatedBid) {
@@ -698,6 +817,42 @@ async function handleConfirmCounterOfferCallback(
                     `📦 Load Request: #${state.loadRequestDisplayID}\n` +
                     `💰 Your Counter-Offer: ETB ${state.counterAmount.toLocaleString()}`,
             );
+
+            // Notify CargoLink: bid_counter_offer_response
+            try {
+                const cargoLinkBaseUrl =
+                    process.env.CARGOLINK_BASE_URL || "https://int.cargolink.io";
+                const sharedApiKey =
+                    process.env.PK12_SHARED_API_KEY ||
+                    "49d1a81c83fcd29c6ef81c67243f524f232d4f17c05456f9f275f999450c9ca2";
+
+                const bid = await getBidById(state.bidId, state.projectName);
+                const loadRequest = bid
+                    ? await getLoadRequestById(bid.loadRequestID, state.projectName)
+                    : null;
+
+                fetch(`${cargoLinkBaseUrl}/api/pk-12/notification`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-api-key": sharedApiKey,
+                    },
+                    body: JSON.stringify({
+                        eventType: "bid_counter_offer_response",
+                        loadRequestId: bid?.loadRequestID || state.bidId,
+                        shipmentId: (loadRequest as any)?.shipmentId || "",
+                        shipmentCaseId: state.loadRequestDisplayID,
+                        bidderId: transporter.uid || transporter.id,
+                        bidderName:
+                            `${transporter.firstName || ""} ${transporter.lastName || ""}`.trim() ||
+                            "Transporter",
+                    }),
+                }).catch((err: unknown) =>
+                    console.error("Failed to send bid_counter_offer_response notification:", err),
+                );
+            } catch (notifErr) {
+                console.error("Failed to send counter-offer notification:", notifErr);
+            }
 
             // Clear counter offer state
             clearCounterOfferStateByChatId(userChatId);
@@ -719,6 +874,26 @@ async function handleConfirmCounterOfferCallback(
             show_alert: true,
         });
     }
+}
+
+/**
+ * Handle "Edit Counter Offer" button click
+ */
+async function handleEditCounterOfferCallback(
+    bot: TelegramBot,
+    callbackId: string,
+    _data: string,
+    chatId: number,
+    userId?: number,
+): Promise<void> {
+    const userChatId = userId || chatId;
+    console.log(`✏️ Editing counter offer for chat ${userChatId}`);
+
+    // Answer callback to remove loading state
+    await bot.answerCallbackQuery(callbackId);
+
+    // Restart the flow
+    await restartCounterOfferFlow(userChatId);
 }
 
 /**

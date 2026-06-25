@@ -37,6 +37,21 @@ export async function handleMessage(bot: TelegramBot, chatId: number, text: stri
         return;
     }
 
+    // Check if user is in counter-offer flow
+    const counterOfferState = getCounterOfferStateByChatId(chatId);
+    if (counterOfferState) {
+        // If counterAmount is 0, they're entering the amount
+        if (counterOfferState.counterAmount === 0) {
+            await handleCounterOfferAmount(bot, chatId, text);
+            return;
+        }
+        // If counterAmount is set but trucks is 0, they're entering trucks
+        if (counterOfferState.counterAmount > 0 && counterOfferState.trucks === 0) {
+            await handleCounterOfferTrucks(bot, chatId, text);
+            return;
+        }
+    }
+
     // Check if user is in the middle of placing a bid
     const pendingBid = getPendingBid(chatId);
 
@@ -169,10 +184,10 @@ async function showBidConfirmation(
     await sendMessage(
         chatId,
         `📋 Bid Summary\n\n` +
-            `📦 Load Request: #${displayID}\n` +
-            `💰 Bid Amount: ETB ${bidAmount.toLocaleString()}\n` +
-            `🚛 Number of Trucks: ${trucks}\n\n` +
-            `Please confirm your bid:`,
+        `📦 Load Request: #${displayID}\n` +
+        `💰 Bid Amount: ETB ${bidAmount.toLocaleString()}\n` +
+        `🚛 Number of Trucks: ${trucks}\n\n` +
+        `Please confirm your bid:`,
         {
             inline_keyboard: [
                 [
@@ -242,10 +257,10 @@ export async function confirmBid(chatId: number): Promise<void> {
         await sendMessage(
             chatId,
             `✅ Bid placed successfully!\n\n` +
-                `📦 Load Request: #${pendingBid.displayID}\n` +
-                `💰 Bid Amount: ETB ${state.bidAmount!.toLocaleString()}\n` +
-                `🚛 Number of Trucks: ${state.numberOfTrucks}\n\n` +
-                `The cargo owner will review your bid. You will be notified if your bid is accepted.`,
+            `📦 Load Request: #${pendingBid.displayID}\n` +
+            `💰 Bid Amount: ETB ${state.bidAmount!.toLocaleString()}\n` +
+            `🚛 Number of Trucks: ${state.numberOfTrucks}\n\n` +
+            `The cargo owner will review your bid. You will be notified if your bid is accepted.`,
             {
                 inline_keyboard: [[{ text: "📋 View My Bids", callback_data: "view_my_bids" }]],
             },
@@ -325,25 +340,98 @@ export async function handleCounterOfferAmount(
     // Update state with counter amount
     state.counterAmount = amount;
 
-    // Show confirmation with buttons
+    // Ask for number of trucks
     await sendMessage(
         chatId,
-        `💰 Confirm your counter-offer:\n\n` +
-            `📦 Load Request: #${state.loadRequestDisplayID}\n` +
-            `💰 Original Bid: ETB ${state.originalBidAmount.toLocaleString()}\n` +
-            `💰 Your Counter-Offer: ETB ${amount.toLocaleString()}\n\n` +
-            `Do you want to proceed?`,
+        `✅ Counter-offer amount: ETB ${amount.toLocaleString()}\n\n` +
+        `🚛 How many trucks can you provide?\n\n` +
+        `Please enter the number of trucks:`,
         {
             inline_keyboard: [
                 [
-                    {
-                        text: "✅ Confirm",
-                        callback_data: `confirm_counter_${state.bidId}_${amount}`,
-                    },
+                    { text: "✏️ Edit Amount", callback_data: `edit_counter_${state.bidId}` },
                     { text: "❌ Cancel", callback_data: `cancel_counter_${state.bidId}` },
                 ],
             ],
         },
     );
+}
+
+/**
+ * Handle counter offer trucks input from user
+ */
+export async function handleCounterOfferTrucks(
+    _bot: TelegramBot,
+    chatId: number,
+    trucksText: string,
+): Promise<void> {
+    const trucks = parseInt(trucksText.trim());
+
+    if (isNaN(trucks) || trucks <= 0) {
+        await sendMessage(chatId, "❌ Please enter a valid number of trucks (e.g., 2)");
+        return;
+    }
+
+    // Get counter offer state
+    const state = getCounterOfferStateByChatId(chatId);
+    if (!state) {
+        await sendMessage(chatId, "❌ Counter offer session expired. Please start over.");
+        return;
+    }
+
+    // Update state with trucks
+    state.trucks = trucks;
+
+    // Show confirmation with buttons
+    await sendMessage(
+        chatId,
+        `💰 Confirm your counter-offer:\n\n` +
+        `📦 Load Request: #${state.loadRequestDisplayID}\n` +
+        `💰 Your Original Bid: ETB ${state.originalBidAmount.toLocaleString()}\n` +
+        `💰 Current Offer: ETB ${state.cargoOwnerOfferAmount.toLocaleString()}\n` +
+        `💰 Your Counter-Offer: ETB ${state.counterAmount.toLocaleString()}\n` +
+        `🚛 Trucks: ${trucks}\n\n` +
+        `Do you want to proceed?`,
+        {
+            inline_keyboard: [
+                [
+                    {
+                        text: "✅ Confirm",
+                        callback_data: `confirm_counter_${state.bidId}`,
+                    },
+                    { text: "✏️ Edit", callback_data: `edit_counter_${state.bidId}` },
+                ],
+                [{ text: "❌ Cancel", callback_data: `cancel_counter_${state.bidId}` }],
+            ],
+        },
+    );
+}
+
+/**
+ * Restart the counter offer flow from the beginning (for edit)
+ */
+export async function restartCounterOfferFlow(chatId: number): Promise<void> {
+    const state = getCounterOfferStateByChatId(chatId);
+    if (!state) {
+        await sendMessage(chatId, "❌ Counter offer session expired. Please start over.");
+        return;
+    }
+
+    // Reset amount and trucks in state to restart the flow
+    state.counterAmount = 0;
+    state.trucks = 0;
+
+    const message = `
+🔄 *Counter Offer (Edit)*
+
+📦 *Load Request:* ${state.loadRequestDisplayID}
+
+💰 *Current Offer:* ETB ${state.cargoOwnerOfferAmount.toLocaleString()}
+💰 *Your Original Bid:* ETB ${state.originalBidAmount.toLocaleString()}
+
+👇 *Please enter your counter-offer amount (ETB):*
+    `.trim();
+
+    await sendMessage(chatId, message);
 }
 
